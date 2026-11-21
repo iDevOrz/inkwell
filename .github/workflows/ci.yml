@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Format, build, test, and lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+
+      - name: Check formatting
+        run: rustup run stable cargo fmt --all -- --check
+
+      - name: Check build
+        run: rustup run stable cargo check --locked
+
+      - name: Run tests
+        run: rustup run stable cargo test --locked
+
+      - name: Run Clippy
+        run: rustup run stable cargo clippy --all-targets --locked -- -D warnings
+
+  docker-build:
+    name: Verify Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build --tag inkwell:ci .
+
+  coverage:
+    name: Generate test coverage report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust and LLVM tools
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        run: rustup run stable cargo install cargo-llvm-cov --locked
+
+      - name: Run tests and generate LCOV report
+        run: rustup run stable cargo llvm-cov --all-targets --lcov --output-path lcov.info
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage-lcov
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 14

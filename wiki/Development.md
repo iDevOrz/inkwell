@@ -9,6 +9,15 @@ cargo clippy --all-targets -- -D warnings
 cargo run -- serve
 ```
 
+## GitHub Actions
+
+- **CI**：push / pull request 到 `main` 时检查格式、编译、测试和 Clippy，并验证 Docker 镜像可以构建。
+- **Coverage**：CI 生成 LCOV 覆盖率报告，作为短期 artifact 保存；当前还没有配置外部覆盖率服务或覆盖率阈值，因此不展示虚假的百分比徽章。
+- **Dependency audit**：Cargo 依赖变更时以及每周运行 RustSec advisory audit。
+- **Dependabot**：每周检查 Cargo 依赖和 GitHub Actions 更新，并创建更新 PR。
+
+Release 二进制和容器镜像发布尚未自动化；确定版本号策略与镜像发布目标后再添加发布 workflow。
+
 ## 项目结构
 
 ```text

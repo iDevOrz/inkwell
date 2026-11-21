@@ -1,5 +1,12 @@
 # Inkwell
 
+<p>
+  <a href="https://github.com/iDevOrz/inkwell/actions/workflows/ci.yml"><img src="https://github.com/iDevOrz/inkwell/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/iDevOrz/inkwell/actions/workflows/security-audit.yml"><img src="https://github.com/iDevOrz/inkwell/actions/workflows/security-audit.yml/badge.svg?branch=main" alt="Dependency audit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2024-000000?logo=rust" alt="Rust Edition 2024"></a>
+</p>
+
 *Write, note, and think with AI.*
 
 [English](README.md) | [简体中文](README.zh-CN.md)

@@ -1,5 +1,7 @@
 # Inkwell
 
+*Write, note, and think with AI.*
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 A self-hosted personal blog and private-notes workspace. Inkwell brings writing, knowledge organization, and AI collaboration together. AI edits are proposed as reviewable versions attached to the original content; the author decides whether to apply and publish them.

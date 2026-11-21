@@ -1,5 +1,7 @@
 # Inkwell
 
+*Write, note, and think with AI.*
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 Inkwell 是一个自托管的个人博客与私密笔记工作台，把写作、知识整理和 AI 协作放在一起。AI 的修改会作为附属于原文的待审版本提交，由作者决定是否应用和发布。

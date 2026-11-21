@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+
+{% block title %}分类与标签{% endblock %}
+{% block heading %}分类与标签{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <a class="tab{% if kind == "category" %} active{% endif %}" href="/admin/terms?status=category">分类</a>
+  <a class="tab{% if kind == "tag" %} active{% endif %}" href="/admin/terms?status=tag">标签</a>
+</div>
+
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="panel-head"><h2>{{ heading }}</h2></div>
+    {% if terms.is_empty() %}
+      <p class="muted">还没有{{ heading }}。</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>名称</th><th>缩略名</th><th>内容数</th><th></th></tr></thead>
+        <tbody>
+          {% for term in terms %}
+            <tr>
+              <td>
+                <strong>{{ term.term.name }}</strong>
+                {% if let Some(description) = term.term.description %}
+                  {% if !description.is_empty() %}<div class="row-sub">{{ description }}</div>{% endif %}
+                {% endif %}
+              </td>
+              <td class="muted">{{ term.term.slug }}</td>
+              <td>{{ term.count }}</td>
+              <td class="actions">
+                <form method="post" action="/admin/terms/{{ term.term.id }}/delete" data-confirm="删除后内容会失去这个{{ heading }}，确定吗？">
+                  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                  <button class="link-button danger" type="submit">删除</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>新建{{ heading }}</h2></div>
+    <form method="post" action="/admin/terms" class="stack-form">
+      <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <label class="field">名称
+        <input type="text" name="name" required>
+      </label>
+      <label class="field">缩略名
+        <input type="text" name="slug" placeholder="留空自动生成">
+      </label>
+      <label class="field">描述
+        <textarea name="description" rows="3"></textarea>
+      </label>
+      <button class="button" type="submit">创建{{ heading }}</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

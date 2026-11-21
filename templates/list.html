@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_home %}{{ ctx.site.title }}{% else %}{{ heading }} · {{ ctx.site.title }}{% endif %}{% endblock %}
+{% block description %}{% if let Some(subheading) = subheading %}{{ subheading }}{% else %}{{ ctx.site.description }}{% endif %}{% endblock %}
+{% block canonical %}{{ canonical }}{% endblock %}
+{% block og_title %}{% if is_home %}{{ ctx.site.title }}{% else %}{{ heading }} · {{ ctx.site.title }}{% endif %}{% endblock %}
+{% block og_description %}{% if let Some(subheading) = subheading %}{{ subheading }}{% else %}{{ ctx.site.description }}{% endif %}{% endblock %}
+{% block og_url %}{{ canonical }}{% endblock %}
+
+{% block head %}
+  {% if is_home %}<script src="/static/timeline.js?v=1" defer></script>{% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if !is_home %}
+    <section class="page-heading">
+      <div>
+        <p class="eyebrow">ARCHIVE</p>
+        <h1>{{ heading }}</h1>
+        {% if let Some(subheading) = subheading %}
+          <p class="subheading">{{ subheading }}</p>
+        {% endif %}
+      </div>
+      <a class="feed-link" href="/feed.xml">RSS</a>
+    </section>
+  {% endif %}
+
+  <section class="writing">
+    {% if is_home %}
+      <div class="section-head">
+        <h1>文章</h1>
+        <span>{{ pagination.total_items }} 篇</span>
+      </div>
+    {% endif %}
+
+    {% if let Some(query) = search_query %}
+      {% if !query.is_empty() %}
+        <p class="search-hint">关键词：<strong>{{ query }}</strong></p>
+      {% endif %}
+    {% endif %}
+
+    {% if (is_home && timeline.is_empty()) || (!is_home && posts.is_empty()) %}
+      <div class="empty-state">
+        <p>这里还没有内容。</p>
+        {% if ctx.user.is_some() %}
+          <a class="button" href="/admin/posts/new">写第一篇文章</a>
+        {% endif %}
+      </div>
+    {% else %}
+      {% if is_home %}
+        <ol class="timeline">
+          {% for entry in timeline %}
+            {% include "partials/timeline_item.html" %}
+          {% endfor %}
+        </ol>
+        {% if let Some(more) = timeline_more %}
+          <div class="timeline-more"
+               data-timeline-more
+               data-before-ts="{{ more.before_ts }}"
+               data-before-id="{{ more.before_id }}"
+               data-last-year="{{ more.last_year }}">
+            <a class="timeline-more-link" href="/timeline/all" data-timeline-load>加载更多</a>
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="post-list">
+          {% for post in posts %}
+            {% include "partials/post_card.html" %}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  {% if !is_home %}
+    {% include "partials/pagination.html" %}
+  {% endif %}
+{% endblock %}

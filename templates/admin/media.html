@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+
+{% block title %}媒体{% endblock %}
+{% block heading %}媒体库{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head"><h2>上传文件</h2><span class="muted">图片、PDF、文本、ZIP</span></div>
+  <form method="post" action="/admin/media" enctype="multipart/form-data" class="upload-form">
+    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+    <input type="file" name="file" required>
+    <button class="button" type="submit">上传</button>
+  </form>
+</section>
+
+{% if media.is_empty() %}
+  <div class="empty-state"><p>媒体库还是空的。</p></div>
+{% else %}
+  <div class="media-grid">
+    {% for item in media %}
+      <article class="media-card panel">
+        {% if item.mime.starts_with("image/") %}
+          <a class="media-thumb" href="{{ item.url }}" target="_blank" rel="noopener">
+            <img src="{{ item.url }}" alt="{{ item.original_name }}" loading="lazy">
+          </a>
+        {% else %}
+          <div class="media-file">{{ item.mime }}</div>
+        {% endif %}
+        <div class="media-info">
+          <strong title="{{ item.original_name }}">{{ item.original_name }}</strong>
+          <span class="muted">{{ item.size_label }} · {{ item.created_label }}</span>
+        </div>
+        <div class="media-actions">
+          <button class="link-button" type="button" data-copy="{{ item.url }}">复制链接</button>
+          <form method="post" action="/admin/media/{{ item.id }}/delete" data-confirm="删除这个文件？">
+            <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+            <button class="link-button danger" type="submit">删除</button>
+          </form>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

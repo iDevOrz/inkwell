@@ -1,0 +1,9 @@
+<div class="diff">
+  {% for line in lines %}
+    <div class="diff-line diff-{{ line.kind }}">
+      <span class="diff-no">{% if let Some(no) = line.old_no %}{{ no }}{% endif %}</span>
+      <span class="diff-no">{% if let Some(no) = line.new_no %}{{ no }}{% endif %}</span>
+      <span class="diff-text">{{ line.text }}</span>
+    </div>
+  {% endfor %}
+</div>

@@ -1,0 +1,106 @@
+{% extends "admin/base.html" %}
+
+{% block title %}仪表盘{% endblock %}
+{% block heading %}仪表盘{% endblock %}
+{% block top_actions %}
+  <a class="button" href="/admin/posts/new">写文章</a>
+  <a class="button button-ghost" href="/admin/notes/new">记笔记</a>
+{% endblock %}
+
+{% block content %}
+<section class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">已发布文章</span>
+    <strong>{{ stats.published_posts }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">草稿</span>
+    <strong>{{ stats.drafts }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">笔记</span>
+    <strong>{{ stats.notes }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">待审核评论</span>
+    <strong>{{ stats.pending_comments }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">待 Review</span>
+    <strong>{{ stats.pending_reviews }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">媒体文件</span>
+    <strong>{{ stats.media }}</strong>
+  </div>
+</section>
+
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Review 队列</h2>
+      <a href="/admin/review">查看全部</a>
+    </div>
+    {% if reviews.is_empty() %}
+      <p class="muted">没有待 review 的内容。</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>标题</th><th>类型</th><th>状态</th><th>更新时间</th></tr></thead>
+        <tbody>
+          {% for item in reviews %}
+            <tr>
+              <td><a href="{{ item.content.admin_url() }}">{{ item.content.title }}</a></td>
+              <td>{{ item.content.kind_label() }}</td>
+              <td><span class="badge badge-warn">{{ item.content.review_label() }}</span></td>
+              <td class="muted">{{ item.updated_label }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>待审核评论</h2>
+      <a href="/admin/comments">查看全部</a>
+    </div>
+    {% if comments.is_empty() %}
+      <p class="muted">没有待审核评论。</p>
+    {% else %}
+      <ul class="compact-list">
+        {% for comment in comments %}
+          <li>
+            <div><strong>{{ comment.author }}</strong> 评论了 <a href="{{ comment.content_admin_url }}">{{ comment.content_title }}</a></div>
+            <p>{{ comment.body }}</p>
+            <span class="muted">{{ comment.created_label }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>最近更新</h2>
+    <a href="/admin/posts">全部文章</a>
+  </div>
+  {% if recent_posts.is_empty() %}
+    <p class="muted">还没有文章。</p>
+  {% else %}
+    <table class="table">
+      <thead><tr><th>标题</th><th>状态</th><th>更新时间</th></tr></thead>
+      <tbody>
+        {% for item in recent_posts %}
+          <tr>
+            <td><a href="{{ item.content.admin_url() }}">{{ item.content.title }}</a></td>
+            <td><span class="badge">{{ item.content.status_label() }}</span></td>
+            <td class="muted">{{ item.updated_label }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}

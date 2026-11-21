@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.content.title }} · {{ ctx.site.title }}{% endblock %}
+{% block description %}{{ post.excerpt_text }}{% endblock %}
+{% block canonical %}{{ canonical }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_title %}{{ post.content.title }}{% endblock %}
+{% block og_description %}{{ post.excerpt_text }}{% endblock %}
+{% block og_url %}{{ canonical }}{% endblock %}
+{% block head %}
+  {% if post.has_mermaid %}
+    <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
+    <script src="/static/mermaid-init.js?v=8" defer></script>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<article class="post">
+  <header class="post-header">
+    <p class="eyebrow">ARTICLE</p>
+    <h1>{{ post.content.title }}</h1>
+    <div class="post-meta">
+      <time>{{ post.published_label }}</time>
+      <span class="dot">·</span>
+      <span>{{ post.author_name }}</span>
+      <span class="dot">·</span>
+      <span>{{ post.reading_minutes }} 分钟阅读</span>
+      {% if let Some(category) = post.categories.first() %}
+        <span class="dot">·</span>
+        <a href="/categories/{{ category.slug }}">{{ category.name }}</a>
+      {% endif %}
+    </div>
+    {% if !post.tags.is_empty() %}
+      <div class="tag-list">
+        {% for tag in post.tags %}
+          <a class="tag" href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if post.content.visibility == "private" %}
+      <div class="flash flash-error">这是一篇私密内容，仅登录用户可见。</div>
+    {% endif %}
+  </header>
+
+  <div class="prose">
+    {{ post.html|safe }}
+  </div>
+
+  <footer class="post-footer">
+    <div class="post-nav">
+      {% if let Some(prev) = prev %}
+        <a class="post-nav-link" href="/archives/{{ prev.slug }}">
+          <span class="post-nav-label">上一篇</span>
+          <span>{{ prev.title }}</span>
+        </a>
+      {% endif %}
+      {% if let Some(next) = next %}
+        <a class="post-nav-link post-nav-next" href="/archives/{{ next.slug }}">
+          <span class="post-nav-label">下一篇</span>
+          <span>{{ next.title }}</span>
+        </a>
+      {% endif %}
+    </div>
+  </footer>
+</article>
+
+<section class="comments" id="comments">
+  <div class="section-heading">
+    <h2>评论</h2>
+    <span class="count">{{ comment_count }}</span>
+  </div>
+
+  {% if comments.is_empty() %}
+    <p class="muted">还没有评论，来说两句吧。</p>
+  {% else %}
+    <div class="comment-list">
+      {% for item in comments %}
+        <div class="comment depth-{{ item.depth }}" id="comment-{{ item.comment.id }}">
+          <div class="comment-head">
+            <strong>{{ item.comment.author }}</strong>
+            <time>{{ item.created_label }}</time>
+            {% if let Some(url) = item.comment.url %}
+              <a class="comment-site" href="{{ url }}" rel="nofollow ugc noopener" target="_blank">网站</a>
+            {% endif %}
+          </div>
+          <div class="comment-body">{{ item.comment.body }}</div>
+          {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
+            <a class="reply-link" href="/archives/{{ post.content.slug }}?reply={{ item.comment.id }}#comment-form">回复</a>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
+    <form class="comment-form" id="comment-form" method="post" action="/comments/{{ post.content.id }}">
+      {% if let Some(reply) = reply_to %}
+        <p class="replying">回复 <strong>{{ reply.comment.author }}</strong>，<a href="/archives/{{ post.content.slug }}#comment-form">取消</a></p>
+      {% endif %}
+      <input type="hidden" name="parent_id" value="{{ comment_form.parent_id }}">
+      <div class="honeypot" aria-hidden="true">
+        <label>网站 <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+      </div>
+      <div class="form-row">
+        <label>昵称
+          <input type="text" name="author" required value="{{ comment_form.author }}" autocomplete="nickname">
+        </label>
+        <label>邮箱
+          <input type="email" name="email" value="{{ comment_form.email }}" autocomplete="email">
+        </label>
+        <label>网站
+          <input type="url" name="url" value="{{ comment_form.url }}" autocomplete="url">
+        </label>
+      </div>
+      <label>评论
+        <textarea name="body" rows="5" required>{{ comment_form.body }}</textarea>
+      </label>
+      <div class="form-actions">
+        <button class="button" type="submit">提交评论</button>
+        <span class="muted">提交后可能需要审核。</span>
+      </div>
+    </form>
+  {% else %}
+    <p class="muted">评论已关闭。</p>
+  {% endif %}
+</section>
+{% endblock %}

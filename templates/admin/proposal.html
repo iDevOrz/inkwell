@@ -1,0 +1,67 @@
+{% extends "admin/base.html" %}
+
+{% block title %}AI 版本 #{{ proposal.id }} · {{ item.content.title }}{% endblock %}
+{% block head %}
+  {% if has_mermaid %}
+    <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
+    <script src="/static/mermaid-init.js?v=8" defer></script>
+  {% endif %}
+{% endblock %}
+{% block heading %}AI 版本 #{{ proposal.id }} · {{ item.content.title }}{% endblock %}
+{% block top_actions %}
+  <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ item.content.id }}/edit">返回编辑</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{ proposal.title }}</h2>
+    <span class="badge badge-proposal-{{ proposal.status }}">{{ proposal.status_label }}</span>
+  </div>
+  <p class="muted">{{ proposal.author_label }} · {{ proposal.created_label }}</p>
+  {% if !proposal.summary.is_empty() %}
+    <p>{{ proposal.summary }}</p>
+  {% endif %}
+  {% if proposal.is_proposed %}
+    <div class="proposal-actions proposal-actions-large">
+      <form method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}/apply">
+        <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <label class="checkbox"><input type="checkbox" name="force" value="1"> 强制应用（忽略文章后续改动）</label>
+        <button class="button" type="submit">应用这个版本</button>
+      </form>
+      <form method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}/reject">
+        <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <input type="text" name="note" placeholder="拒绝原因（可选）">
+        <button class="button button-ghost" type="submit">拒绝</button>
+      </form>
+    </div>
+  {% elif !proposal.decision_note.is_empty() %}
+    <p class="muted">{{ proposal.decision_note }}</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>结果预览</h2>
+    <span class="muted">应用后会变成这样</span>
+  </div>
+  <article class="annotatable proposal-preview">
+    <h1>{{ proposal.title }}</h1>
+    {{ html|safe }}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>与当前正文的差异</h2>
+    <span class="muted">统一 diff</span>
+  </div>
+  {% if old_title != new_title %}
+    <div class="diff-title">
+      <del>{{ old_title }}</del>
+      <ins>{{ new_title }}</ins>
+    </div>
+  {% endif %}
+  {% include "admin/partials/diff.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,16 @@
+services:
+  typecho-rs:
+    build: .
+    container_name: typecho-rs
+    ports:
+      - "3000:3000"
+    environment:
+      SITE_URL: "${SITE_URL:-http://localhost:3000}"
+      ADMIN_USER: "admin"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}"
+      MCP_TOKEN: "${MCP_TOKEN:-}"
+      MCP_TOKEN_SCOPES: "read,write,review"
+      RUST_LOG: "typecho_rs=info,tower_http=info"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

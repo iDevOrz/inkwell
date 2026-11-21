@@ -1,0 +1,217 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if is_new %}新建{% else %}编辑{% endif %} {{ kind_label }}{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="/static/vditor/dist/index.css?v=1">
+  <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
+  <script src="/static/mermaid-init.js?v=8" defer></script>
+  <script src="/static/vditor/dist/index.min.js?v=1" defer></script>
+  <script src="/static/vditor-editor.js?v=4" defer></script>
+{% endblock %}
+{% block heading %}{% if is_new %}新建{{ kind_label }}{% else %}编辑{{ kind_label }}{% endif %}{% endblock %}
+{% block top_actions %}
+  {% if let Some(item) = item %}
+    <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ item.content.id }}/annotate">划词批注</a>
+    <a class="button button-ghost" href="{{ item.content.public_url() }}" target="_blank" rel="noopener">查看 ↗</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="editor">
+  <form class="editor-main panel" method="post"
+        action="{% if let Some(id) = content_id %}/admin/{{ kind_path }}/{{ id }}{% else %}/admin/{{ kind_path }}{% endif %}">
+    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+
+    <label class="field">标题
+      <input class="title-input" type="text" name="title" value="{{ form.title }}" required autofocus>
+    </label>
+
+    <div class="form-row">
+      <label class="field">缩略名
+        <input type="text" name="slug" value="{{ form.slug }}" placeholder="留空自动生成">
+      </label>
+      <label class="field">分类
+        <select name="category">
+          <option value="">无分类</option>
+          {% for category in categories %}
+            <option value="{{ category.slug }}" {% if form.category == category.slug %}selected{% endif %}>{{ category.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="field">正文（Markdown）
+      <div id="vditor" class="vditor-host"></div>
+      <textarea id="body-input" name="body" hidden>{{ form.body }}</textarea>
+    </div>
+
+    <label class="field">摘要
+      <textarea name="excerpt" rows="3" placeholder="留空自动从正文提取">{{ form.excerpt }}</textarea>
+    </label>
+
+    <div class="form-row">
+      <label class="field">标签
+        <input type="text" name="tags" value="{{ form.tags }}" placeholder="用逗号分隔">
+      </label>
+      <label class="field">状态
+        <select name="status">
+          {% for status in statuses %}
+            {% if status.value != "trash" %}
+              <option value="{{ status.value }}" {% if status.selected %}selected{% endif %}>{{ status.label }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label class="field">可见性
+        <select name="visibility">
+          {% for visibility in visibilities %}
+            <option value="{{ visibility.value }}" {% if visibility.selected %}selected{% endif %}>{{ visibility.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">Review 状态
+        <select name="review_status">
+          {% for review in reviews %}
+            <option value="{{ review.value }}" {% if review.selected %}selected{% endif %}>{{ review.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field checkbox-field">
+        <span>评论</span>
+        <label class="checkbox">
+          <input type="checkbox" name="allow_comments" value="1" {% if form.allow_comments %}checked{% endif %}>
+          允许评论
+        </label>
+      </label>
+    </div>
+
+    <label class="field">Review 备注
+      <textarea name="review_notes" rows="3" placeholder="给作者或 AI 的 review 意见">{{ form.review_notes }}</textarea>
+    </label>
+
+    <div class="editor-actions">
+      <button class="button" type="submit" name="action" value="save">保存</button>
+      {% if kind != "note" %}
+        <button class="button button-primary" type="submit" name="action" value="publish">发布</button>
+      {% endif %}
+      {% if let Some(id) = content_id %}
+        <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ id }}/annotate">划词批注</a>
+      {% endif %}
+      <button class="button button-ghost" type="submit" name="action" value="submit_review">提交 Review</button>
+    </div>
+  </form>
+
+  <aside class="editor-side">
+    {% if let Some(item) = item %}
+      <section class="panel side-panel">
+        <h3>信息</h3>
+        <dl class="meta-list">
+          <dt>作者</dt><dd>{{ item.author_name }}</dd>
+          <dt>创建</dt><dd>{{ item.created_label }}</dd>
+          <dt>更新</dt><dd>{{ item.updated_label }}</dd>
+          <dt>发布</dt><dd>{{ item.published_label }}</dd>
+          <dt>字数</dt><dd>{{ item.content.body.len() }}</dd>
+        </dl>
+        <div class="side-links">
+          <a href="{{ item.content.public_url() }}" target="_blank" rel="noopener">公开页面 ↗</a>
+          <a href="/admin/{{ kind_path }}/{{ item.content.id }}/edit">刷新</a>
+        </div>
+      </section>
+
+      {% if kind == "note" %}
+        <section class="panel side-panel">
+          <h3>笔记发布</h3>
+          {% if let Some(promoted) = promoted %}
+            <p class="muted">已转为文章：</p>
+            <p><a href="/admin/posts/{{ promoted.id }}/edit">{{ promoted.title }}</a></p>
+            <p><a href="/archives/{{ promoted.slug }}" target="_blank" rel="noopener">查看文章 ↗</a></p>
+            <form method="post" action="/admin/notes/{{ item.content.id }}/promote">
+              <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+              <input type="hidden" name="sync" value="1">
+              <button class="button button-ghost" type="submit">同步最新内容到文章</button>
+            </form>
+          {% else %}
+            <form method="post" action="/admin/notes/{{ item.content.id }}/promote">
+              <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+              <label class="field">文章标题
+                <input type="text" name="title" value="{{ item.content.title }}">
+              </label>
+              <label class="field">文章缩略名
+                <input type="text" name="slug" value="{{ item.content.slug }}">
+              </label>
+              <label class="field">发布状态
+                <select name="status">
+                  <option value="draft">草稿</option>
+                  <option value="published">直接发布</option>
+                </select>
+              </label>
+              <button class="button" type="submit">转为文章</button>
+            </form>
+          {% endif %}
+        </section>
+      {% endif %}
+
+      {% if let Some(source_note) = source_note %}
+        <section class="panel side-panel">
+          <h3>来源笔记</h3>
+          <p><a href="/admin/notes/{{ source_note.id }}/edit">{{ source_note.title }}</a></p>
+        </section>
+      {% endif %}
+
+      {% if !item.backlinks.is_empty() %}
+        <section class="panel side-panel">
+          <h3>反向链接</h3>
+          <ul class="side-list">
+            {% for backlink in item.backlinks %}
+              <li><a href="{{ backlink.content.admin_url() }}">{{ backlink.content.title }}</a></li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
+      {% if !item.outgoing.is_empty() %}
+        <section class="panel side-panel">
+          <h3>出链</h3>
+          <ul class="side-list">
+            {% for link in item.outgoing %}
+              <li>
+                {% if let Some(url) = link.target_admin_url %}
+                  <a href="{{ url }}">{{ link.title }}</a>
+                {% else %}
+                  <span class="muted">{{ link.title }}（未创建）</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
+      {% if !proposals.is_empty() %}
+        <section class="panel side-panel">
+          <h3>AI 版本</h3>
+          {% include "admin/partials/proposal_list.html" %}
+        </section>
+      {% endif %}
+
+      {% if !revisions.is_empty() %}
+        <section class="panel side-panel">
+          <h3>修订历史</h3>
+          <ul class="revision-list">
+            {% for revision in revisions %}
+              <li>
+                <strong>{{ revision.created_label }}</strong>
+                <span class="muted">{{ revision.actor }}</span>
+                {% if !revision.note.is_empty() %}<div>{{ revision.note }}</div>{% endif %}
+                <a href="/admin/{{ kind_path }}/{{ item.content.id }}/revisions/{{ revision.id }}">查看改动</a>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

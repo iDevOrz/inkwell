@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+
+{% block title %}批注{% endblock %}
+{% block heading %}批注{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>批注队列</h2>
+    <span class="muted">{{ annotations.len() }} 条</span>
+  </div>
+  <div class="tabs">
+    <a class="{% if status_filter == "open" %}active{% endif %}" href="/admin/annotations?status=open">待处理 {{ open_count }}</a>
+    <a class="{% if status_filter == "addressed" %}active{% endif %}" href="/admin/annotations?status=addressed">AI 已改 {{ addressed_count }}</a>
+    <a class="{% if status_filter == "all" %}active{% endif %}" href="/admin/annotations?status=all">全部</a>
+  </div>
+  <p class="muted annotation-hint">
+    批注入口：打开文章或笔记列表，点每行的「批注」；也可以在编辑页点「划词批注」。
+    <a href="/admin/posts">文章</a> · <a href="/admin/notes">笔记</a>
+  </p>
+  {% if annotations.is_empty() %}
+    <p class="muted">这里还没有批注。</p>
+  {% else %}
+    <div class="annotation-queue">
+      {% for item in annotations %}
+        <article class="annotation-queue-item">
+          <div class="annotation-head">
+            <a class="row-title" href="{{ item.annotate_url }}">{{ item.content_title }}</a>
+            <span class="badge badge-annotation-{{ item.status }}">{{ item.status_label }}</span>
+          </div>
+          {% if let Some(quote) = item.quote %}
+            <blockquote class="annotation-quote">{{ quote }}</blockquote>
+          {% endif %}
+          <p class="annotation-comment">{{ item.comment }}</p>
+          <div class="annotation-meta muted">{{ item.author_label }} · {{ item.created_label }} · {{ item.content_kind }}</div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

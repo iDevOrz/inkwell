@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{% block title %}后台{% endblock %} · {{ ctx.site.title }}</title>
+  <script src="/static/theme-init.js?v=1"></script>
+  <link rel="stylesheet" href="/static/theme.css?v=1">
+  <link rel="stylesheet" href="/static/admin.css?v=20">
+  {% block head %}{% endblock %}
+</head>
+<body class="admin">
+  <aside class="sidebar">
+    <a class="sidebar-brand" href="/admin">
+      <span class="brand-mark">T</span>
+      <span>{{ ctx.site.title }}</span>
+    </a>
+    <nav class="sidebar-nav">
+      <a class="{% if ctx.active == "dashboard" %}active{% endif %}" href="/admin">仪表盘</a>
+      <a class="{% if ctx.active == "posts" %}active{% endif %}" href="/admin/posts">文章</a>
+      <a class="{% if ctx.active == "pages" %}active{% endif %}" href="/admin/pages">页面</a>
+      <a class="{% if ctx.active == "notes" %}active{% endif %}" href="/admin/notes">笔记</a>
+      <a class="{% if ctx.active == "review" %}active{% endif %}" href="/admin/review">Review</a>
+      <a class="{% if ctx.active == "annotations" %}active{% endif %}" href="/admin/annotations">批注</a>
+      <a class="{% if ctx.active == "comments" %}active{% endif %}" href="/admin/comments">评论</a>
+      <a class="{% if ctx.active == "terms" %}active{% endif %}" href="/admin/terms">分类与标签</a>
+      <a class="{% if ctx.active == "media" %}active{% endif %}" href="/admin/media">媒体</a>
+      <a class="{% if ctx.active == "tokens" %}active{% endif %}" href="/admin/tokens">MCP Token</a>
+      <a class="{% if ctx.active == "settings" %}active{% endif %}" href="/admin/settings">设置</a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/" target="_blank" rel="noopener">查看站点 ↗</a>
+      <a href="/admin/password">修改密码</a>
+      <form method="post" action="/admin/logout">
+        <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <button class="link-button" type="submit">退出登录</button>
+      </form>
+      <span class="sidebar-user">{{ ctx.user.display_name }}</span>
+    </div>
+  </aside>
+
+  <main class="admin-main">
+    <header class="admin-topbar">
+      <div class="admin-topbar-title">{% block heading %}后台{% endblock %}</div>
+      <div class="admin-topbar-actions">
+        {% include "partials/theme-toggle.html" %}
+        {% block top_actions %}{% endblock %}
+      </div>
+    </header>
+    <div class="admin-content">
+      {% include "partials/flash.html" %}
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+  <script src="/static/app.js?v=7" defer></script>
+</body>
+</html>

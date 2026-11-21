@@ -1,0 +1,6 @@
+{% if let Some(notice) = ctx.notice %}
+  <div class="flash flash-ok" role="status">{{ notice }}</div>
+{% endif %}
+{% if let Some(error) = ctx.error %}
+  <div class="flash flash-error" role="alert">{{ error }}</div>
+{% endif %}

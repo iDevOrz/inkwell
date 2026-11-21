@@ -1,0 +1,13 @@
+{% if pagination.total_pages > 1 %}
+<nav class="pagination" aria-label="分页">
+  {% if let Some(prev) = pagination.prev_url %}
+    <a class="page-prev" href="{{ prev }}">← 上一页</a>
+  {% endif %}
+  {% for page in pagination.pages %}
+    <a class="page-number{% if page.active %} active{% endif %}" href="{{ page.url }}">{{ page.number }}</a>
+  {% endfor %}
+  {% if let Some(next) = pagination.next_url %}
+    <a class="page-next" href="{{ next }}">下一页 →</a>
+  {% endif %}
+</nav>
+{% endif %}

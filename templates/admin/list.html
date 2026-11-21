@@ -1,0 +1,114 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ heading }}{% endblock %}
+{% block heading %}{{ heading }}{% endblock %}
+{% block top_actions %}
+  <a class="button" href="{{ base_path }}/new">新建{{ heading }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  {% for count in counts %}
+    <a class="tab{% if count.active %} active{% endif %}" href="{{ base_path }}?status={{ count.value }}">
+      {{ count.label }} <span>{{ count.count }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+<form class="toolbar" method="get" action="{{ base_path }}">
+  {% if status_filter != "all" %}
+    <input type="hidden" name="status" value="{{ status_filter }}">
+  {% endif %}
+  <input type="search" name="q" value="{{ query }}" placeholder="搜索标题或正文…">
+  <button class="button button-ghost" type="submit">搜索</button>
+  {% if !query.is_empty() %}
+    <a class="button button-ghost" href="{{ base_path }}?status={{ status_filter }}">清除</a>
+  {% endif %}
+</form>
+
+{% if items.is_empty() %}
+  <div class="empty-state">
+    <p>这里还没有内容。</p>
+    <a class="button" href="{{ base_path }}/new">新建{{ heading }}</a>
+  </div>
+{% else %}
+  <div class="panel table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>标题</th>
+          <th>状态</th>
+          <th>Review</th>
+          <th>更新时间</th>
+          <th class="actions-col">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+          <tr>
+            <td>
+              <a class="row-title" href="{{ item.content.admin_url() }}">{{ item.content.title }}</a>
+              <div class="row-sub">
+                {% if let Some(category) = item.categories.first() %}{{ category.name }} · {% endif %}
+                {{ item.content.slug }}
+                {% if item.content.visibility == "private" %} · 私密{% endif %}
+              </div>
+            </td>
+            <td><span class="badge badge-{{ item.content.status }}">{{ item.content.status_label() }}</span></td>
+            <td>
+              {% if item.content.review_status == "none" %}
+                <span class="muted">—</span>
+              {% else %}
+                <span class="badge badge-review-{{ item.content.review_status }}">{{ item.content.review_label() }}</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ item.updated_label }}</td>
+            <td class="actions">
+              <a href="{{ item.content.admin_url() }}">编辑</a>
+              <a href="{{ base_path }}/{{ item.content.id }}/annotate">批注</a>
+
+              {% if item.content.kind == "note" %}
+                {% if let Some(post_id) = item.promoted_id %}
+                  <a href="/admin/posts/{{ post_id }}/edit">已转文章</a>
+                {% else %}
+                  <form method="post" action="/admin/notes/{{ item.content.id }}/promote">
+                    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                    <input type="hidden" name="status" value="draft">
+                    <button class="link-button" type="submit">转为文章</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                {% if item.content.status != "published" && item.content.status != "trash" %}
+                  <form method="post" action="/admin/{{ item.content.kind }}s/{{ item.content.id }}/publish">
+                    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                    <button class="link-button" type="submit">发布</button>
+                  </form>
+                {% endif %}
+              {% endif %}
+
+              {% if item.content.status == "trash" %}
+                <form method="post" action="/admin/{{ item.content.kind }}s/{{ item.content.id }}/restore">
+                  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                  <button class="link-button" type="submit">恢复</button>
+                </form>
+                <form method="post" action="/admin/{{ item.content.kind }}s/{{ item.content.id }}/delete" data-confirm="彻底删除后无法恢复，确定吗？">
+                  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                  <input type="hidden" name="permanent" value="1">
+                  <button class="link-button danger" type="submit">彻底删除</button>
+                </form>
+              {% else %}
+                <form method="post" action="/admin/{{ item.content.kind }}s/{{ item.content.id }}/delete" data-confirm="移入回收站？">
+                  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                  <button class="link-button danger" type="submit">删除</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% include "partials/pagination.html" %}
+{% endblock %}

@@ -1,0 +1,26 @@
+<ul class="proposal-list">
+  {% for proposal in proposals %}
+    <li class="proposal-item">
+      <div class="proposal-head">
+        <span class="badge badge-proposal-{{ proposal.status }}">{{ proposal.status_label }}</span>
+        <span class="muted">#{{ proposal.id }} · {{ proposal.created_label }}</span>
+      </div>
+      {% if !proposal.summary.is_empty() %}
+        <div class="proposal-summary">{{ proposal.summary }}</div>
+      {% endif %}
+      <div class="proposal-actions">
+        <a href="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}">预览与差异</a>
+        {% if proposal.is_proposed %}
+          <form method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}/apply">
+            <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+            <button class="link-button" type="submit">应用</button>
+          </form>
+          <form method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}/reject">
+            <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+            <button class="link-button" type="submit">拒绝</button>
+          </form>
+        {% endif %}
+      </div>
+    </li>
+  {% endfor %}
+</ul>

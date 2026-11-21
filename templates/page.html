@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page.content.title }} · {{ ctx.site.title }}{% endblock %}
+{% block description %}{{ page.excerpt_text }}{% endblock %}
+{% block canonical %}{{ canonical }}{% endblock %}
+{% block og_title %}{{ page.content.title }}{% endblock %}
+{% block og_description %}{{ page.excerpt_text }}{% endblock %}
+{% block og_url %}{{ canonical }}{% endblock %}
+{% block head %}
+  {% if page.has_mermaid %}
+    <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
+    <script src="/static/mermaid-init.js?v=8" defer></script>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<article class="post page">
+  <header class="post-header">
+    <p class="eyebrow">PAGE</p>
+    <h1>{{ page.content.title }}</h1>
+    <div class="post-meta">
+      <span>{{ page.author_name }}</span>
+      <span class="dot">·</span>
+      <time>{{ page.updated_label }}</time>
+    </div>
+  </header>
+  <div class="prose">
+    {{ page.html|safe }}
+  </div>
+</article>
+{% endblock %}

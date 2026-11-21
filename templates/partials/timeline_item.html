@@ -1,0 +1,9 @@
+<li class="timeline-item{% if entry.year.is_some() %} timeline-year-start{% endif %}">
+  <span class="timeline-year">{% if let Some(year) = entry.year %}{{ year }}{% endif %}</span>
+  <div class="timeline-content">
+    <time class="timeline-date" datetime="{{ entry.post.published_label }}">{{ entry.post.published_month_day }}</time>
+    <div class="timeline-body">
+      <h2><a href="/archives/{{ entry.post.slug }}">{{ entry.post.title }}</a></h2>
+    </div>
+  </div>
+</li>

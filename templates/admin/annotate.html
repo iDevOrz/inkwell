@@ -1,0 +1,91 @@
+{% extends "admin/base.html" %}
+
+{% block title %}批注 · {{ item.content.title }}{% endblock %}
+{% block head %}
+  <script src="/static/annotations.js?v=1" defer></script>
+{% endblock %}
+{% block heading %}批注 · {{ item.content.title }}{% endblock %}
+{% block top_actions %}
+  <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ item.content.id }}/edit">返回编辑</a>
+{% endblock %}
+
+{% block content %}
+<div class="annotate-layout"
+     id="annotator"
+     data-csrf="{{ ctx.csrf }}"
+     data-create-url="/admin/{{ kind_path }}/{{ item.content.id }}/annotations"
+     data-content-id="{{ item.content.id }}">
+  <section class="panel annotate-main">
+    <div class="panel-head">
+      <h2>{{ item.content.title }}</h2>
+      <span class="muted">{{ item.content.status_label() }}</span>
+    </div>
+    <article class="annotatable" id="annotatable">{{ item.html|safe }}</article>
+  </section>
+
+  <aside class="panel annotate-side">
+    <div class="panel-head">
+      <h2>整体评价</h2>
+      <span class="muted">{{ general_count }} 条</span>
+    </div>
+    <form class="annotation-form" method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/annotations">
+      <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+      <input type="hidden" name="kind" value="general">
+      <label class="field">整体意见
+        <textarea name="comment" rows="3" placeholder="例如：整体语气更克制，结构改成三段…" required></textarea>
+      </label>
+      <button class="button" type="submit">添加整体评论</button>
+    </form>
+
+    <div class="panel-head annotation-section-head">
+      <h2>划线批注</h2>
+      <span class="muted">{{ inline_count }} 条</span>
+    </div>
+    <p class="muted annotation-hint">在左侧选中文字，然后点「添加批注」。</p>
+
+    <form id="inline-annotation-form" class="annotation-form is-hidden" method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/annotations">
+      <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+      <input type="hidden" name="kind" value="inline">
+      <input type="hidden" name="quote" id="annotation-quote">
+      <input type="hidden" name="prefix" id="annotation-prefix">
+      <input type="hidden" name="suffix" id="annotation-suffix">
+      <input type="hidden" name="start_offset" id="annotation-start">
+      <input type="hidden" name="end_offset" id="annotation-end">
+      <blockquote class="annotation-quote" id="selected-quote"></blockquote>
+      <label class="field">批注内容
+        <textarea name="comment" id="annotation-comment" rows="3" placeholder="这段可以更简洁…" required></textarea>
+      </label>
+      <div class="annotation-form-actions">
+        <button class="button" type="submit">添加批注</button>
+        <button class="link-button" type="button" id="annotation-cancel">取消</button>
+      </div>
+    </form>
+
+    <div id="general-list">
+      {% for annotation in annotations %}
+        {% if annotation.kind == "general" %}
+          {% include "admin/partials/annotation_item.html" %}
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div id="inline-list">
+      {% for annotation in annotations %}
+        {% if annotation.kind == "inline" %}
+          {% include "admin/partials/annotation_item.html" %}
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {% if !proposals.is_empty() %}
+      <div class="panel-head annotation-section-head">
+        <h2>AI 版本</h2>
+        <span class="muted">{{ proposals.len() }} 个</span>
+      </div>
+      {% include "admin/partials/proposal_list.html" %}
+    {% endif %}
+  </aside>
+</div>
+
+<button class="annotation-toolbar is-hidden" id="annotation-toolbar" type="button">添加批注</button>
+{% endblock %}

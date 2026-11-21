@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+
+{% block title %}修订对比 · {{ item.content.title }}{% endblock %}
+{% block heading %}修订对比 · {{ item.content.title }}{% endblock %}
+{% block top_actions %}
+  <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ item.content.id }}/edit">返回编辑</a>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{ revision.note }}</h2>
+    <span class="muted">{{ revision.actor }} · {{ revision.created_label }}</span>
+  </div>
+  <p class="muted">
+    对比：
+    {% if let Some(previous) = previous %}{{ previous.created_label }}{% else %}空白{% endif %}
+    → {{ revision.created_label }}
+  </p>
+  {% if old_title != new_title %}
+    <div class="diff-title">
+      <del>{{ old_title }}</del>
+      <ins>{{ new_title }}</ins>
+    </div>
+  {% endif %}
+  {% include "admin/partials/diff.html" %}
+</section>
+{% endblock %}

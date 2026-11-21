@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+
+{% block title %}MCP Token{% endblock %}
+{% block heading %}MCP Token{% endblock %}
+
+{% block content %}
+{% if let Some(token) = new_token %}
+  <div class="token-reveal">
+    <strong>Token 已创建，只显示这一次：</strong>
+    <code>{{ token }}</code>
+    <p class="muted">请立即复制保存。服务端只保存哈希，之后无法再次查看。</p>
+  </div>
+{% endif %}
+
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="panel-head"><h2>已有 Token</h2></div>
+    {% if tokens.is_empty() %}
+      <p class="muted">还没有创建 Token。</p>
+    {% else %}
+      <table class="table">
+        <thead><tr><th>名称</th><th>权限</th><th>创建</th><th>最近使用</th><th></th></tr></thead>
+        <tbody>
+          {% for token in tokens %}
+            <tr>
+              <td>
+                <strong>{{ token.name }}</strong>
+                {% if token.revoked %}<span class="badge badge-trash">已吊销</span>{% endif %}
+              </td>
+              <td><code class="scopes">{{ token.scopes }}</code></td>
+              <td class="muted">{{ token.created_label }}</td>
+              <td class="muted">{{ token.last_used_label }}</td>
+              <td class="actions">
+                {% if !token.revoked %}
+                  <form method="post" action="/admin/tokens/{{ token.id }}/revoke" data-confirm="吊销这个 Token？">
+                    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                    <button class="link-button danger" type="submit">吊销</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>创建 Token</h2></div>
+    <form method="post" action="/admin/tokens" class="stack-form">
+      <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+      <label class="field">名称
+        <input type="text" name="name" placeholder="例如：Claude Desktop" required>
+      </label>
+      <div class="scope-grid">
+        {% for scope in scopes %}
+          <label class="checkbox">
+            <input type="checkbox" name="scope_{{ scope.value }}" value="1" {% if scope.checked %}checked{% endif %}>
+            {{ scope.label }}
+          </label>
+        {% endfor %}
+      </div>
+      <p class="field-hint">默认只给读取、写入和 review；发布权限建议单独确认。</p>
+      <button class="button" type="submit">创建 Token</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

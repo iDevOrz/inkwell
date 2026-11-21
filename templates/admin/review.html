@@ -1,0 +1,81 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Review{% endblock %}
+{% block heading %}Review 队列{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>待 Review 内容</h2>
+    <span class="muted">{{ reviews.len() }} 项</span>
+  </div>
+  {% if reviews.is_empty() %}
+    <p class="muted">没有待 review 的内容。</p>
+  {% else %}
+    <div class="review-list">
+      {% for item in reviews %}
+        <article class="review-item">
+          <div class="review-head">
+            <div>
+              <a class="row-title" href="{{ item.content.admin_url() }}">{{ item.content.title }}</a>
+              <div class="row-sub">{{ item.content.kind_label() }} · {{ item.updated_label }} · {{ item.author_name }}</div>
+            </div>
+            <span class="badge badge-review-pending">待 Review</span>
+          </div>
+          <p class="review-excerpt">{{ item.excerpt_text }}</p>
+          <form method="post" action="/admin/review/{{ item.content.id }}" class="review-form">
+            <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+            <div class="form-row">
+              <label class="field">结论
+                <select name="verdict">
+                  <option value="approved">通过</option>
+                  <option value="changes_requested">需要修改</option>
+                </select>
+              </label>
+              {% if item.content.kind != "note" %}
+                <label class="checkbox"><input type="checkbox" name="publish" value="1"> 通过后直接发布</label>
+              {% endif %}
+            </div>
+            <label class="field">Review 备注
+              <textarea name="notes" rows="3" placeholder="给作者/AI 的修改建议"></textarea>
+            </label>
+            <button class="button" type="submit">提交 Review</button>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>待审核评论</h2>
+    <a href="/admin/comments">全部评论</a>
+  </div>
+  {% if comments.is_empty() %}
+    <p class="muted">没有待审核评论。</p>
+  {% else %}
+    <ul class="compact-list">
+      {% for comment in comments %}
+        <li>
+          <div><strong>{{ comment.author }}</strong> 评论了 <a href="{{ comment.content_admin_url }}">{{ comment.content_title }}</a></div>
+          <p>{{ comment.body }}</p>
+          <div class="inline-actions">
+            <form method="post" action="/admin/comments/{{ comment.id }}/status">
+              <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+              <input type="hidden" name="action" value="approve">
+              <button class="link-button" type="submit">通过</button>
+            </form>
+            <form method="post" action="/admin/comments/{{ comment.id }}/status">
+              <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+              <input type="hidden" name="action" value="spam">
+              <button class="link-button danger" type="submit">垃圾</button>
+            </form>
+            <span class="muted">{{ comment.created_label }}</span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>
+{% endblock %}

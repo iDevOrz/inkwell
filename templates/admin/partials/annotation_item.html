@@ -1,0 +1,41 @@
+<article class="annotation-item"
+         data-annotation-id="{{ annotation.id }}"
+         data-kind="{{ annotation.kind }}"
+         {% if let Some(quote) = annotation.quote %}data-quote="{{ quote }}"{% endif %}
+         {% if let Some(prefix) = annotation.prefix %}data-prefix="{{ prefix }}"{% endif %}
+         {% if let Some(suffix) = annotation.suffix %}data-suffix="{{ suffix }}"{% endif %}
+         {% if let Some(start) = annotation.start_offset %}data-start="{{ start }}"{% endif %}
+         {% if let Some(end) = annotation.end_offset %}data-end="{{ end }}"{% endif %}>
+  <div class="annotation-head">
+    <span class="badge badge-annotation-{{ annotation.status }}">{{ annotation.status_label }}</span>
+    <span class="muted">{{ annotation.author_label }} · {{ annotation.created_label }}</span>
+  </div>
+  {% if let Some(quote) = annotation.quote %}
+    <blockquote class="annotation-quote">{{ quote }}</blockquote>
+  {% endif %}
+  <p class="annotation-comment">{{ annotation.comment }}</p>
+  {% for reply in annotation.replies %}
+    <div class="annotation-reply">
+      <div class="annotation-reply-head">{{ reply.author_label }} · {{ reply.created_label }}</div>
+      <p>{{ reply.body }}</p>
+    </div>
+  {% endfor %}
+  <form class="annotation-reply-form" method="post" action="/admin/annotations/{{ annotation.id }}/reply">
+    <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+    <textarea name="body" rows="2" placeholder="回复或说明改了什么" required></textarea>
+    <button class="link-button" type="submit">回复</button>
+  </form>
+  <div class="annotation-actions">
+    {% if annotation.status == "resolved" %}
+      <form method="post" action="/admin/annotations/{{ annotation.id }}/reopen">
+        <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <button class="link-button" type="submit">重新打开</button>
+      </form>
+    {% else %}
+      <form method="post" action="/admin/annotations/{{ annotation.id }}/resolve">
+        <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <button class="link-button" type="submit">确认解决</button>
+      </form>
+    {% endif %}
+  </div>
+</article>

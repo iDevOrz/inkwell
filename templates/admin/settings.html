@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+
+{% block title %}设置{% endblock %}
+{% block heading %}站点设置{% endblock %}
+
+{% block content %}
+<form method="post" action="/admin/settings" class="panel settings-form">
+  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+
+  <section>
+    <h2>基本信息</h2>
+    <div class="form-row">
+      <label class="field">站点标题
+        <input type="text" name="site_title" value="{{ settings.title }}" required>
+      </label>
+      <label class="field">站点地址
+        <input type="url" name="site_url" value="{{ settings.site_url }}" required>
+      </label>
+    </div>
+    <label class="field">站点描述
+      <textarea name="site_description" rows="3">{{ settings.description }}</textarea>
+    </label>
+    <label class="field">关键词
+      <input type="text" name="site_keywords" value="{{ settings.keywords }}">
+    </label>
+    <label class="field">页脚文字
+      <input type="text" name="footer_text" value="{{ settings.footer_text }}">
+    </label>
+  </section>
+
+  <section>
+    <h2>阅读与时间</h2>
+    <div class="form-row">
+      <label class="field">每页文章数
+        <input type="number" name="page_size" value="{{ settings.page_size }}" min="1" max="100" required>
+      </label>
+      <label class="field">时区偏移（分钟）
+        <input type="number" name="timezone_offset" value="{{ settings.timezone_offset }}" min="-720" max="840" required>
+        <span class="field-hint">例如北京时间是 480</span>
+      </label>
+    </div>
+    <label class="checkbox">
+      <input type="checkbox" name="feed_full_text" value="1" {% if settings.feed_full_text %}checked{% endif %}>
+      RSS/Atom 输出全文
+    </label>
+  </section>
+
+  <section>
+    <h2>评论</h2>
+    <label class="checkbox">
+      <input type="checkbox" name="comments_enabled" value="1" {% if settings.comments_enabled %}checked{% endif %}>
+      启用评论
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="comments_moderation" value="1" {% if settings.comments_moderation %}checked{% endif %}>
+      新评论需要审核
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="comments_require_email" value="1" {% if settings.comments_require_email %}checked{% endif %}>
+      评论必须填写邮箱
+    </label>
+  </section>
+
+  <div class="form-actions">
+    <button class="button" type="submit">保存设置</button>
+  </div>
+</form>
+{% endblock %}

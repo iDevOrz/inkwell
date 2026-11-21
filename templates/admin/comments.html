@@ -1,0 +1,69 @@
+{% extends "admin/base.html" %}
+
+{% block title %}评论{% endblock %}
+{% block heading %}评论{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  {% for count in counts %}
+    <a class="tab{% if count.active %} active{% endif %}" href="/admin/comments?status={{ count.value }}">
+      {{ count.label }} <span>{{ count.count }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+{% if comments.is_empty() %}
+  <div class="empty-state"><p>这个分类下没有评论。</p></div>
+{% else %}
+  <div class="comment-admin-list">
+    {% for comment in comments %}
+      <article class="panel comment-admin-item">
+        <div class="comment-admin-head">
+          <div>
+            <strong>{{ comment.author }}</strong>
+            {% if !comment.email.is_empty() %}<span class="muted">{{ comment.email }}</span>{% endif %}
+            {% if !comment.url.is_empty() %}<a href="{{ comment.url }}" target="_blank" rel="noopener">网站 ↗</a>{% endif %}
+            <span class="muted">评论了</span>
+            <a href="{{ comment.content_admin_url }}">{{ comment.content_title }}</a>
+          </div>
+          <span class="badge badge-{{ comment.status }}">{{ comment.status_label }}</span>
+        </div>
+        <div class="comment-admin-body">{{ comment.body }}</div>
+        <div class="comment-admin-foot">
+          <span class="muted">{{ comment.created_label }}</span>
+          <div class="inline-actions">
+            {% if comment.status != "approved" %}
+              <form method="post" action="/admin/comments/{{ comment.id }}/status">
+                <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                <input type="hidden" name="action" value="approve">
+                <button class="link-button" type="submit">通过</button>
+              </form>
+            {% endif %}
+            {% if comment.status != "pending" %}
+              <form method="post" action="/admin/comments/{{ comment.id }}/status">
+                <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                <input type="hidden" name="action" value="pending">
+                <button class="link-button" type="submit">待审</button>
+              </form>
+            {% endif %}
+            {% if comment.status != "spam" %}
+              <form method="post" action="/admin/comments/{{ comment.id }}/status">
+                <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+                <input type="hidden" name="action" value="spam">
+                <button class="link-button danger" type="submit">垃圾</button>
+              </form>
+            {% endif %}
+            <form method="post" action="/admin/comments/{{ comment.id }}/status" data-confirm="删除这条评论？">
+              <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+              <input type="hidden" name="action" value="delete">
+              <button class="link-button danger" type="submit">删除</button>
+            </form>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% include "partials/pagination.html" %}
+{% endblock %}

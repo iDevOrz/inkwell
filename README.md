@@ -1,10 +1,10 @@
-# typecho-rs
+# Inkwell
 
 一个用 Rust 重写的轻量个人博客 + 笔记系统，原生支持 MCP，方便让 AI 参与写作、整理和 review。
 
 参考了 Typecho 的数据模型和基础功能，但**不兼容 Typecho 主题/插件**，也不追求后台像素级复刻。目标是：单二进制、SQLite、部署简单、长期可维护。
 
-模板和静态资源在编译时嵌入二进制，部署时只需要 `typecho-rs` 可执行文件 + `data/` 目录。
+模板和静态资源在编译时嵌入二进制，部署时只需要 `inkwell` 可执行文件 + `data/` 目录。
 
 视觉风格：前后台统一 **shadcn/ui 风格**（CSS token 移植，不引入 React/Tailwind 构建链），支持 `light / dark / system` 主题切换。
 
@@ -46,7 +46,7 @@
 ### 本地运行
 
 ```bash
-cd typecho-rs
+cd inkwell
 cp .env.example .env
 # 编辑 .env，至少设置 ADMIN_PASSWORD 和 SITE_URL
 
@@ -100,7 +100,7 @@ example.com {
 }
 ```
 
-`SITE_URL` 要设置成外部访问地址（`https://example.com`），这样 RSS、sitemap、Open Graph 和 Secure Cookie 才是正确的。
+`SITE_URL` 要设置成外部访问地址（`https://example.com`），这样 RSS、sitemap、Open Graph 和 Secure Cookie 才是正确的。默认不信任客户端传入的 `X-Forwarded-For` / `X-Real-IP`；只有应用端口不对外开放，且反向代理会覆盖这些头时，才设置 `TRUST_PROXY_HEADERS=true`。
 
 ---
 
@@ -117,9 +117,10 @@ example.com {
 | `MCP_TOKEN` | 空 | HTTP MCP 的部署级 Bearer Token |
 | `MCP_TOKEN_SCOPES` | `read,write,review` | 部署级 Token 的权限 |
 | `COOKIE_SECURE` | 根据 `SITE_URL` 自动判断 | 是否强制 Secure Cookie |
+| `TRUST_PROXY_HEADERS` | `false` | 仅当服务只能经由会覆盖转发头的可信反向代理访问时启用 |
 | `SESSION_DAYS` | `14` | 登录有效期 |
 | `MAX_UPLOAD_BYTES` | `10485760` | 单文件上传上限 |
-| `RUST_LOG` | `typecho_rs=info,tower_http=info` | 日志级别 |
+| `RUST_LOG` | `inkwell=info,tower_http=info` | 日志级别 |
 
 站点标题、描述、每页文章数、时区、评论设置等在后台 `/admin/settings` 修改。
 
@@ -187,7 +188,7 @@ Mermaid 脚本只在需要它的文章页和后台编辑页加载，不会拖慢
 1. **stdio**：适合本地 AI 客户端直接启动进程
 
 ```bash
-typecho-rs mcp
+inkwell mcp
 ```
 
 2. **HTTP**：随 Web 服务启动
@@ -254,8 +255,8 @@ AI 版本：
 ```json
 {
   "mcpServers": {
-    "typecho-rs": {
-      "command": "/absolute/path/to/typecho-rs",
+    "inkwell": {
+      "command": "/absolute/path/to/inkwell",
       "args": ["mcp"],
       "env": {
         "DATA_DIR": "/absolute/path/to/data",
@@ -271,7 +272,7 @@ AI 版本：
 ```json
 {
   "mcpServers": {
-    "typecho-rs": {
+    "inkwell": {
       "url": "http://127.0.0.1:3000/mcp",
       "headers": {
         "Authorization": "Bearer tcr_xxxxxxxxxxxxxxxxx"

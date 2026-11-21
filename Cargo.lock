@@ -1006,6 +1006,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkwell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "askama",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "dotenvy",
+ "http-body-util",
+ "include_dir",
+ "mime_guess",
+ "percent-encoding",
+ "pulldown-cmark",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "sqlx",
+ "subtle",
+ "syntect",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "two-face",
+ "url",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2325,42 +2361,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "syntect",
-]
-
-[[package]]
-name = "typecho-rs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "argon2",
- "askama",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "chrono",
- "dotenvy",
- "http-body-util",
- "include_dir",
- "mime_guess",
- "percent-encoding",
- "pulldown-cmark",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "sqlx",
- "subtle",
- "syntect",
- "tempfile",
- "thiserror",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "two-face",
- "url",
 ]
 
 [[package]]

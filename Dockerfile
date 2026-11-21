@@ -24,14 +24,14 @@ RUN apt-get update \
     && chown -R app:app /app
 
 WORKDIR /app
-COPY --from=builder /app/target/release/typecho-rs /usr/local/bin/typecho-rs
+COPY --from=builder /app/target/release/inkwell /usr/local/bin/inkwell
 
 USER app
 ENV DATA_DIR=/app/data \
     BIND_ADDR=0.0.0.0:3000 \
-    RUST_LOG=typecho_rs=info,tower_http=info
+    RUST_LOG=inkwell=info,tower_http=info
 
 VOLUME ["/app/data"]
 EXPOSE 3000
 
-CMD ["typecho-rs", "serve"]
+CMD ["inkwell", "serve"]

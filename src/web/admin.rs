@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 
-use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::HeaderMap;
 use axum::http::header::SET_COOKIE;
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -299,6 +300,7 @@ async fn login_page(
 
 async fn login_submit(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> AppResult<Response> {
@@ -318,9 +320,8 @@ async fn login_submit(
         .await;
     }
 
-    let ip = client_ip(&headers).unwrap_or_else(|| "unknown".to_string());
-    let key = format!("{}:{}", form.username.trim(), ip);
-    if !state.login_limiter.allowed(&key) {
+    let ip = client_ip(&headers, peer, state.config.trust_proxy_headers);
+    if !state.login_limiter.allowed(&ip) {
         return render_login(
             &state,
             Some("尝试次数过多，请 10 分钟后再试。".to_string()),
@@ -330,8 +331,20 @@ async fn login_submit(
         .await;
     }
 
-    let Some(user) = user::find_by_username(&state.db, form.username.trim()).await? else {
-        state.login_limiter.record_failure(&key);
+    let username = form.username.trim();
+    if username.is_empty() || username.chars().count() > 128 || form.password.len() > 1024 {
+        state.login_limiter.record_failure(&ip);
+        return render_login(
+            &state,
+            Some("用户名或密码错误。".to_string()),
+            next,
+            form.username,
+        )
+        .await;
+    };
+
+    let Some(user) = user::find_by_username(&state.db, username).await? else {
+        state.login_limiter.record_failure(&ip);
         return render_login(
             &state,
             Some("用户名或密码错误。".to_string()),
@@ -342,7 +355,7 @@ async fn login_submit(
     };
 
     if !verify_password(&form.password, &user.password_hash) {
-        state.login_limiter.record_failure(&key);
+        state.login_limiter.record_failure(&ip);
         return render_login(
             &state,
             Some("用户名或密码错误。".to_string()),
@@ -352,7 +365,7 @@ async fn login_submit(
         .await;
     }
 
-    state.login_limiter.record_success(&key);
+    state.login_limiter.record_success(&ip);
     let (token, _) = create_session(
         &state.db,
         user.id,

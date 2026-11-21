@@ -1,7 +1,7 @@
 services:
-  typecho-rs:
+  inkwell:
     build: .
-    container_name: typecho-rs
+    container_name: inkwell
     ports:
       - "3000:3000"
     environment:
@@ -10,7 +10,7 @@ services:
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}"
       MCP_TOKEN: "${MCP_TOKEN:-}"
       MCP_TOKEN_SCOPES: "read,write,review"
-      RUST_LOG: "typecho_rs=info,tower_http=info"
+      RUST_LOG: "inkwell=info,tower_http=info"
     volumes:
       - ./data:/app/data
     restart: unless-stopped

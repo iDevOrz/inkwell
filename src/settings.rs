@@ -28,7 +28,7 @@ impl SiteSettings {
             description: "记录想法、笔记与文章。".to_string(),
             keywords: "博客,笔记,Rust".to_string(),
             site_url: site_url.trim_end_matches('/').to_string(),
-            footer_text: "由 typecho-rs 驱动".to_string(),
+            footer_text: "由 inkwell 驱动".to_string(),
             page_size: 8,
             timezone_offset: 480,
             comments_enabled: true,

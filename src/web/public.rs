@@ -1,12 +1,13 @@
 use axum::Form;
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::TimeZone;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
+use std::net::SocketAddr;
 
 use crate::auth::OptionalUser;
 use crate::error::{AppError, AppResult};
@@ -528,9 +529,12 @@ pub async fn page(
 pub async fn comment(
     State(state): State<AppState>,
     Path(content_id): Path<i64>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Form(form): Form<NewCommentForm>,
 ) -> AppResult<Response> {
+    const MAX_COMMENT_DEPTH: i64 = 8;
+
     let Some(content_row) = content::get_by_id(&state.db, content_id).await? else {
         return Err(AppError::not_found("内容不存在"));
     };
@@ -551,6 +555,17 @@ pub async fn comment(
         return Ok(axum::response::Redirect::to(&target).into_response());
     }
 
+    let ip = client_ip(&headers, peer, state.config.trust_proxy_headers);
+    let rate_limit_key = format!("comment:{ip}");
+    if !state.login_limiter.allowed(&rate_limit_key) {
+        return Ok((
+            StatusCode::TOO_MANY_REQUESTS,
+            "评论提交过于频繁，请稍后再试。",
+        )
+            .into_response());
+    }
+    state.login_limiter.record_attempt(&rate_limit_key);
+
     if site.comments_require_email
         && form
             .email
@@ -569,7 +584,11 @@ pub async fn comment(
     let mut parent_id = form.parent_id.unwrap_or(0).max(0);
     if parent_id > 0 {
         match comment::get(&state.db, parent_id).await? {
-            Some(parent) if parent.content_id == content_row.id && parent.status == "approved" => {}
+            Some(parent) if parent.content_id == content_row.id && parent.status == "approved" => {
+                if comment::reply_depth(&state.db, parent_id).await? >= MAX_COMMENT_DEPTH {
+                    return Err(AppError::bad_request("评论回复层级不能超过 8 层"));
+                }
+            }
             _ => parent_id = 0,
         }
     }
@@ -590,7 +609,7 @@ pub async fn comment(
             url: form.url,
             body: form.body,
             status: status.to_string(),
-            ip: client_ip(&headers),
+            ip: Some(ip),
             user_agent: user_agent(&headers),
         },
     )

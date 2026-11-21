@@ -88,7 +88,7 @@ async fn authenticate(state: &AppState, token: &str) -> anyhow::Result<Option<Mc
 fn unauthorized(message: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        [(WWW_AUTHENTICATE, "Bearer realm=\"typecho-rs\"")],
+        [(WWW_AUTHENTICATE, "Bearer realm=\"inkwell\"")],
         Json(json!({"error": message})),
     )
         .into_response()

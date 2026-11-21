@@ -110,7 +110,7 @@
 - 提供 Dockerfile / docker-compose（`data/` 挂载为 volume）
 - SQLite 使用 WAL、foreign_keys、busy_timeout
 - 媒体走 `Storage` trait：当前 `LocalStorage`，未来加 `S3Storage` 不影响业务层
-- 备份 = 复制 `data/`（提供 `typecho-rs backup` 命令更好）
+- 备份 = 复制 `data/`（提供 `inkwell backup` 命令更好）
 
 > 如果未来需要多用户/高并发，可把 sqlx 切换到 PostgreSQL。为此：
 > - 业务代码只依赖仓储接口，不直接拼 SQL
@@ -290,7 +290,7 @@ POST     /admin/preview                 Markdown 预览
 
 ```text
 POST /mcp                    Streamable HTTP（Bearer Token）
-typecho-rs mcp --stdio       stdio 模式（本地 AI 客户端）
+inkwell mcp --stdio       stdio 模式（本地 AI 客户端）
 ```
 
 ---

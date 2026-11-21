@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import public articles from a Typecho/Cactus blog into typecho-rs.
+Import public articles from a Typecho/Cactus blog into inkwell.
 
 Only use this for content you own or have permission to migrate.
 
@@ -30,7 +30,7 @@ from bs4 import BeautifulSoup, Tag
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0 Safari/537.36 typecho-rs-importer/0.1"
+    "Chrome/124.0 Safari/537.36 inkwell-importer/0.1"
 )
 TZ = timezone(timedelta(hours=8))
 ALLOWED_IMAGE_EXT = {"png", "jpg", "jpeg", "gif", "webp", "avif"}

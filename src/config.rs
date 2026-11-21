@@ -15,6 +15,7 @@ pub struct Config {
     pub mcp_token: Option<String>,
     pub mcp_token_scopes: Vec<String>,
     pub secure_cookies: bool,
+    pub trust_proxy_headers: bool,
     pub session_days: i64,
     pub max_upload_bytes: usize,
 }
@@ -60,6 +61,11 @@ impl Config {
             .map(|value| parse_bool(&value))
             .unwrap_or_else(|| site_url.starts_with("https://"));
 
+        let trust_proxy_headers = env::var("TRUST_PROXY_HEADERS")
+            .ok()
+            .map(|value| parse_bool(&value))
+            .unwrap_or(false);
+
         let session_days = env::var("SESSION_DAYS")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -80,6 +86,7 @@ impl Config {
             mcp_token,
             mcp_token_scopes,
             secure_cookies,
+            trust_proxy_headers,
             session_days,
             max_upload_bytes,
         })

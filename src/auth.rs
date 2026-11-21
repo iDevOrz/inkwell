@@ -251,51 +251,107 @@ pub fn append_cookie(headers: &mut HeaderMap, value: HeaderValue) {
 struct Attempt {
     failures: u32,
     blocked_until: Option<Instant>,
+    last_seen: Instant,
+}
+
+const LOGIN_ATTEMPT_TTL: Duration = Duration::from_secs(20 * 60);
+const LOGIN_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_LOGIN_KEYS: usize = 4_096;
+
+#[derive(Default)]
+struct LoginLimiterState {
+    attempts: HashMap<String, Attempt>,
+    last_cleanup: Option<Instant>,
 }
 
 #[derive(Default)]
 pub struct LoginLimiter {
-    attempts: Mutex<HashMap<String, Attempt>>,
+    state: Mutex<LoginLimiterState>,
 }
 
 impl LoginLimiter {
     pub fn allowed(&self, key: &str) -> bool {
-        let mut attempts = self.attempts.lock().expect("login limiter lock");
-        if attempts.len() > 2_000 {
-            attempts.retain(|_, attempt| {
-                attempt
-                    .blocked_until
-                    .map(|until| until > Instant::now())
-                    .unwrap_or(false)
-                    || attempt.failures > 0
-            });
+        let now = Instant::now();
+        let mut state = self.state.lock().expect("login limiter lock");
+        Self::cleanup(&mut state, now);
+
+        if let Some(attempt) = state.attempts.get_mut(key) {
+            attempt.last_seen = now;
+            if let Some(until) = attempt.blocked_until {
+                if until > now {
+                    return false;
+                }
+                attempt.failures = 0;
+                attempt.blocked_until = None;
+            }
         }
-        match attempts.get(key) {
-            Some(attempt) => attempt
-                .blocked_until
-                .map(|until| until <= Instant::now())
-                .unwrap_or(true),
-            None => true,
-        }
+        true
     }
 
     pub fn record_failure(&self, key: &str) {
-        let mut attempts = self.attempts.lock().expect("login limiter lock");
-        let entry = attempts.entry(key.to_string()).or_insert(Attempt {
+        self.record_attempt(key);
+    }
+
+    pub fn record_attempt(&self, key: &str) {
+        let now = Instant::now();
+        let mut state = self.state.lock().expect("login limiter lock");
+        Self::cleanup(&mut state, now);
+
+        if !state.attempts.contains_key(key) && state.attempts.len() >= MAX_LOGIN_KEYS {
+            // Keep the unauthenticated limiter bounded. Prefer evicting an
+            // unblocked entry; fall back to any entry only if all are blocked.
+            let victim = state
+                .attempts
+                .iter()
+                .find(|(_, attempt)| {
+                    attempt
+                        .blocked_until
+                        .map(|until| until <= now)
+                        .unwrap_or(true)
+                })
+                .map(|(key, _)| key.clone())
+                .or_else(|| state.attempts.keys().next().cloned());
+            if let Some(victim) = victim {
+                state.attempts.remove(&victim);
+            }
+        }
+
+        let entry = state.attempts.entry(key.to_string()).or_insert(Attempt {
             failures: 0,
             blocked_until: None,
+            last_seen: now,
         });
+        entry.last_seen = now;
         entry.failures += 1;
         if entry.failures >= 5 {
-            entry.blocked_until = Some(Instant::now() + Duration::from_secs(10 * 60));
+            entry.blocked_until = Some(now + Duration::from_secs(10 * 60));
         }
     }
 
     pub fn record_success(&self, key: &str) {
-        self.attempts
+        self.state
             .lock()
             .expect("login limiter lock")
+            .attempts
             .remove(key);
+    }
+
+    fn cleanup(state: &mut LoginLimiterState, now: Instant) {
+        let should_cleanup = state
+            .last_cleanup
+            .map(|last| now.duration_since(last) >= LOGIN_CLEANUP_INTERVAL)
+            .unwrap_or(true);
+        if !should_cleanup {
+            return;
+        }
+
+        state.attempts.retain(|_, attempt| {
+            attempt
+                .blocked_until
+                .map(|until| until > now)
+                .unwrap_or_else(|| now.duration_since(attempt.last_seen) < LOGIN_ATTEMPT_TTL)
+        });
+        state.last_cleanup = Some(now);
     }
 }
 
@@ -319,5 +375,15 @@ mod tests {
             limiter.record_failure(key);
         }
         assert!(!limiter.allowed(key));
+    }
+
+    #[test]
+    fn limiter_storage_is_bounded_for_unique_keys() {
+        let limiter = LoginLimiter::default();
+        for index in 0..(MAX_LOGIN_KEYS + 100) {
+            limiter.record_failure(&format!("user-{index}:127.0.0.1"));
+        }
+        let state = limiter.state.lock().expect("login limiter lock");
+        assert!(state.attempts.len() <= MAX_LOGIN_KEYS);
     }
 }

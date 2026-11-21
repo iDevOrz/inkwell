@@ -78,13 +78,18 @@ pub fn flatten_comments(
     timezone_offset: i32,
 ) -> Vec<CommentItem> {
     let mut result = Vec::new();
-    for node in nodes {
+    let mut stack: Vec<(CommentNode, i64)> =
+        nodes.into_iter().rev().map(|node| (node, depth)).collect();
+    while let Some((node, node_depth)) = stack.pop() {
+        let CommentNode { comment, children } = node;
         result.push(CommentItem {
-            created_label: crate::util::format_datetime(node.comment.created_at, timezone_offset),
-            comment: node.comment,
-            depth,
+            created_label: crate::util::format_datetime(comment.created_at, timezone_offset),
+            comment,
+            depth: node_depth,
         });
-        result.extend(flatten_comments(node.children, depth + 1, timezone_offset));
+        for child in children.into_iter().rev() {
+            stack.push((child, node_depth + 1));
+        }
     }
     result
 }
@@ -202,4 +207,34 @@ pub async fn user_display_name(state: &AppState, id: i64) -> AppResult<String> {
         .await?
         .map(|user| user.display_name)
         .unwrap_or_else(|| "未知作者".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Comment;
+    use crate::repo::comment;
+
+    #[test]
+    fn deeply_nested_comments_are_traversed_without_recursion() {
+        let comments = (1..=10_000)
+            .map(|id| Comment {
+                id,
+                content_id: 1,
+                parent_id: id - 1,
+                author: "reader".to_string(),
+                email: None,
+                url: None,
+                body: format!("comment {id}"),
+                status: "approved".to_string(),
+                ip: None,
+                user_agent: None,
+                created_at: id,
+            })
+            .collect();
+
+        let flat = flatten_comments(comment::build_tree(comments), 0, 0);
+        assert_eq!(flat.len(), 10_000);
+        assert_eq!(flat.last().map(|item| item.depth), Some(9_999));
+    }
 }

@@ -162,19 +162,31 @@ pub fn safe_next(value: Option<&str>) -> String {
     }
 }
 
-pub fn client_ip(headers: &axum::http::HeaderMap) -> Option<String> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|value| value.to_str().ok())
-                .map(|value| value.trim().to_string())
-        })
+pub fn client_ip(
+    headers: &axum::http::HeaderMap,
+    peer: std::net::SocketAddr,
+    trust_proxy_headers: bool,
+) -> String {
+    if trust_proxy_headers {
+        let forwarded = headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim);
+        let real_ip = headers
+            .get("x-real-ip")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim);
+
+        if let Some(ip) = forwarded
+            .or(real_ip)
+            .and_then(|value| value.parse::<std::net::IpAddr>().ok())
+        {
+            return ip.to_string();
+        }
+    }
+
+    peer.ip().to_string()
 }
 
 pub fn user_agent(headers: &axum::http::HeaderMap) -> Option<String> {
@@ -210,5 +222,15 @@ mod tests {
         assert_eq!(safe_next(Some("/admin/posts")), "/admin/posts");
         assert_eq!(safe_next(Some("https://evil.example")), "/admin");
         assert_eq!(safe_next(Some("//evil.example")), "/admin");
+    }
+
+    #[test]
+    fn forwarded_ip_is_ignored_unless_proxy_trust_is_enabled() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-forwarded-for", "198.51.100.77".parse().unwrap());
+        let peer = "192.0.2.10:3000".parse().unwrap();
+
+        assert_eq!(client_ip(&headers, peer, false), "192.0.2.10");
+        assert_eq!(client_ip(&headers, peer, true), "198.51.100.77");
     }
 }

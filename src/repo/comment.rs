@@ -85,6 +85,22 @@ pub async fn get(pool: &SqlitePool, id: i64) -> AppResult<Option<Comment>> {
     .await?)
 }
 
+pub async fn reply_depth(pool: &SqlitePool, comment_id: i64) -> AppResult<i64> {
+    Ok(sqlx::query_scalar(
+        "WITH RECURSIVE ancestry(id, parent_id, depth) AS ( \
+             SELECT id, parent_id, 0 FROM comments WHERE id = ? \
+             UNION ALL \
+             SELECT parent.id, parent.parent_id, ancestry.depth + 1 \
+             FROM comments parent JOIN ancestry ON parent.id = ancestry.parent_id \
+             WHERE ancestry.parent_id > 0 AND ancestry.depth < 64 \
+         ) \
+         SELECT COALESCE(MAX(depth), 0) FROM ancestry",
+    )
+    .bind(comment_id)
+    .fetch_one(pool)
+    .await?)
+}
+
 pub async fn list_for_content(
     pool: &SqlitePool,
     content_id: i64,
@@ -103,27 +119,92 @@ pub async fn list_for_content(
 }
 
 pub fn build_tree(comments: Vec<Comment>) -> Vec<CommentNode> {
-    let mut by_parent: HashMap<i64, Vec<Comment>> = HashMap::new();
-    for comment in comments {
-        by_parent
-            .entry(comment.parent_id)
-            .or_default()
-            .push(comment);
+    let len = comments.len();
+    if len == 0 {
+        return Vec::new();
     }
 
-    fn build(parent_id: i64, by_parent: &mut HashMap<i64, Vec<Comment>>) -> Vec<CommentNode> {
-        by_parent
-            .remove(&parent_id)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|comment| {
-                let children = build(comment.id, by_parent);
-                CommentNode { comment, children }
-            })
-            .collect()
+    let indices: HashMap<i64, usize> = comments
+        .iter()
+        .enumerate()
+        .map(|(index, comment)| (comment.id, index))
+        .collect();
+    let mut parents: Vec<Option<usize>> = comments
+        .iter()
+        .map(|comment| {
+            indices
+                .get(&comment.parent_id)
+                .copied()
+                .filter(|parent| *parent != indices[&comment.id])
+        })
+        .collect();
+
+    // Break malformed cycles defensively so traversal and drop remain bounded.
+    let mut completed = vec![false; len];
+    for start in 0..len {
+        if completed[start] {
+            continue;
+        }
+        let mut path = Vec::new();
+        let mut positions = HashMap::new();
+        let mut current = Some(start);
+        while let Some(index) = current {
+            if completed[index] {
+                break;
+            }
+            if positions.contains_key(&index) {
+                parents[index] = None;
+                break;
+            }
+            positions.insert(index, path.len());
+            path.push(index);
+            current = parents[index];
+        }
+        for index in path {
+            completed[index] = true;
+        }
     }
 
-    build(0, &mut by_parent)
+    let mut children = vec![Vec::new(); len];
+    let mut roots = Vec::new();
+    for (index, parent) in parents.into_iter().enumerate() {
+        if let Some(parent) = parent {
+            children[parent].push(index);
+        } else {
+            roots.push(index);
+        }
+    }
+
+    let mut comments: Vec<Option<Comment>> = comments.into_iter().map(Some).collect();
+    let mut built: Vec<Option<CommentNode>> = (0..len).map(|_| None).collect();
+    for root in &roots {
+        let mut stack = vec![(*root, false)];
+        while let Some((index, expanded)) = stack.pop() {
+            if built[index].is_some() {
+                continue;
+            }
+            if expanded {
+                let node_children = children[index]
+                    .iter()
+                    .filter_map(|child| built[*child].take())
+                    .collect();
+                built[index] = Some(CommentNode {
+                    comment: comments[index].take().expect("comment node is built once"),
+                    children: node_children,
+                });
+            } else {
+                stack.push((index, true));
+                for child in children[index].iter().rev() {
+                    stack.push((*child, false));
+                }
+            }
+        }
+    }
+
+    roots
+        .into_iter()
+        .filter_map(|index| built[index].take())
+        .collect()
 }
 
 pub async fn list_admin(

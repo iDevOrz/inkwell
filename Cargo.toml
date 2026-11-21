@@ -1,5 +1,5 @@
 [package]
-name = "typecho-rs"
+name = "inkwell"
 version = "0.1.0"
 edition = "2024"
 description = "A small, self-hosted blog and notes system with MCP support"

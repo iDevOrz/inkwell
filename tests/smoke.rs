@@ -1,12 +1,14 @@
+use std::net::SocketAddr;
 use std::path::Path;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Method, Request, Response, header};
+use axum::extract::connect_info::MockConnectInfo;
+use axum::http::{Method, Request, Response, StatusCode, header};
 use http_body_util::BodyExt;
+use inkwell::{app, config::Config};
 use serde_json::{Value, json};
 use tower::ServiceExt;
-use typecho_rs::{app, config::Config};
 
 fn test_config(data_dir: &Path) -> Config {
     Config {
@@ -23,6 +25,7 @@ fn test_config(data_dir: &Path) -> Config {
             "review".to_string(),
         ],
         secure_cookies: false,
+        trust_proxy_headers: false,
         session_days: 14,
         max_upload_bytes: 1024 * 1024,
     }
@@ -103,7 +106,8 @@ async fn blog_login_notes_and_mcp_smoke() {
     let state = app::build_state(test_config(temp.path()))
         .await
         .expect("build state");
-    let router = app::router(state);
+    let router =
+        app::router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
 
     // Public home renders the seeded welcome post.
     let home = router
@@ -118,7 +122,31 @@ async fn blog_login_notes_and_mcp_smoke() {
         .expect("home");
     assert_eq!(home.status(), 200);
     let home_html = body_string(home).await;
-    assert!(home_html.contains("欢迎使用 typecho-rs"));
+    assert!(home_html.contains("欢迎使用 inkwell"));
+
+    // Public comments are rate-limited by the socket peer, not spoofable headers.
+    for attempt in 0..6 {
+        let comment = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/comments/1")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(encode(&[
+                        ("author", "Reader"),
+                        ("body", &format!("测试评论 {attempt}")),
+                    ])))
+                    .expect("comment request"),
+            )
+            .await
+            .expect("comment response");
+        if attempt < 5 {
+            assert_eq!(comment.status(), StatusCode::SEE_OTHER);
+        } else {
+            assert_eq!(comment.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
 
     let css = router
         .clone()
@@ -200,7 +228,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         }),
     )
     .await;
-    assert_eq!(init["result"]["serverInfo"]["name"], "typecho-rs");
+    assert_eq!(init["result"]["serverInfo"]["name"], "inkwell");
 
     let note = mcp_tool(
         &router,

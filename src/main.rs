@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use inkwell::{app, config::Config, db, mcp};
+use std::net::SocketAddr;
 use tracing_subscriber::EnvFilter;
-use typecho_rs::{app, config::Config, db, mcp};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -9,7 +10,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("typecho_rs=info,tower_http=info")),
+                .unwrap_or_else(|_| EnvFilter::new("inkwell=info,tower_http=info")),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -35,10 +36,10 @@ async fn main() -> Result<()> {
             Ok(())
         }
         "--version" | "-V" | "version" => {
-            println!("typecho-rs {}", env!("CARGO_PKG_VERSION"));
+            println!("inkwell {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        other => anyhow::bail!("unknown command: {other}\n\nRun `typecho-rs --help` for usage."),
+        other => anyhow::bail!("unknown command: {other}\n\nRun `inkwell --help` for usage."),
     }
 }
 
@@ -51,21 +52,24 @@ async fn serve(config: Config) -> Result<()> {
         .await
         .with_context(|| format!("bind {bind_addr}"))?;
 
-    tracing::info!("typecho-rs listening on http://{bind_addr}");
-    axum::serve(listener, router)
-        .await
-        .context("run http server")?;
+    tracing::info!("inkwell listening on http://{bind_addr}");
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("run http server")?;
     Ok(())
 }
 
 fn print_help() {
     println!(
-        "typecho-rs {}\n\
+        "inkwell {}\n\
          \n\
          Usage:\n\
-           typecho-rs serve        Start the web server (default)\n\
-           typecho-rs mcp          Start the MCP server over stdio\n\
-           typecho-rs migrate      Create/upgrade the database and exit\n\
+           inkwell serve        Start the web server (default)\n\
+           inkwell mcp          Start the MCP server over stdio\n\
+           inkwell migrate      Create/upgrade the database and exit\n\
          \n\
          Environment:\n\
            BIND_ADDR        default 127.0.0.1:3000\n\
@@ -74,9 +78,10 @@ fn print_help() {
            SITE_URL         public site URL, default http://127.0.0.1:3000\n\
            ADMIN_USER       default admin\n\
            ADMIN_PASSWORD   initial password; generated if omitted\n\
-           MCP_TOKEN        optional HTTP MCP bearer token\n\
-           MCP_TOKEN_SCOPES default read,write,review\n\
-           COOKIE_SECURE    force Secure cookies (auto for https SITE_URL)\n\
+            MCP_TOKEN        optional HTTP MCP bearer token\n\
+            MCP_TOKEN_SCOPES default read,write,review\n\
+            COOKIE_SECURE    force Secure cookies (auto for https SITE_URL)\n\
+            TRUST_PROXY_HEADERS default false; trust forwarded IP headers only behind a trusted proxy\n\
          \n\
          MCP over HTTP is available at POST /mcp with a Bearer token.\n",
         env!("CARGO_PKG_VERSION")

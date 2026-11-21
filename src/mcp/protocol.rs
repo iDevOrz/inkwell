@@ -151,7 +151,7 @@ fn initialize_result(params: &Value) -> Value {
             "resources": { "subscribe": false, "listChanged": false }
         },
         "serverInfo": {
-            "name": "typecho-rs",
+            "name": "inkwell",
             "version": env!("CARGO_PKG_VERSION")
         },
         "instructions": "Typecho-rs blog and notes server. AI can read and write drafts/notes, submit content for review, and moderate comments. For collaborative editing, use annotation_queue to pull open annotations, read the content with content_get, create a proposed version with proposal_create (do not create a separate draft article), then reply to each annotation with annotation_reply and the proposal id. The human reviews the proposal diff and applies or rejects it. Publishing requires an explicit publish-scoped token."

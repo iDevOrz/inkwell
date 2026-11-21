@@ -64,8 +64,8 @@ pub async fn run(pool: &SqlitePool, config: &Config) -> AppResult<()> {
             pool,
             content::ContentInput {
                 kind: "post".to_string(),
-                title: "欢迎使用 typecho-rs".to_string(),
-                slug: Some("hello-typecho-rs".to_string()),
+                title: "欢迎使用 inkwell".to_string(),
+                slug: Some("hello-inkwell".to_string()),
                 body: r#"# 欢迎
 
 这是你的第一篇文章。你可以在后台写文章、记录笔记，也可以让 AI 通过 MCP 帮你整理和 review。
@@ -81,7 +81,7 @@ pub async fn run(pool: &SqlitePool, config: &Config) -> AppResult<()> {
 
 ```rust
 fn main() {
-    println!("hello, typecho-rs");
+    println!("hello, inkwell");
 }
 ```
 "#

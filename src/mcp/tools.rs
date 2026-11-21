@@ -372,7 +372,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "comment_moderate",
-            "Moderate or delete a comment.",
+            "Moderate a comment. Permanently deleting a comment requires the admin scope.",
             json!({
                 "id": {"type": "integer"},
                 "action": {"type": "string", "enum": ["approve", "pending", "spam", "trash", "delete"]}
@@ -1182,9 +1182,13 @@ async fn comment_moderate(
     principal: &McpPrincipal,
     args: &Value,
 ) -> AppResult<Value> {
-    require(principal, "review")?;
     let id = required_i64(args, "id")?;
     let action = required_str(args, "action")?;
+    if action == "delete" {
+        require(principal, "admin")?;
+    } else {
+        require(principal, "review")?;
+    }
     match action.as_str() {
         "approve" => comment::moderate(&state.db, id, "approved").await?,
         "pending" => comment::moderate(&state.db, id, "pending").await?,

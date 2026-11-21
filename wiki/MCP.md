@@ -35,6 +35,7 @@ Token 可通过 `MCP_TOKEN` 设置，也可在后台 `/admin/tokens` 创建独�
 | `admin` | 全部权限 |
 
 默认建议使用 `read,write,review`，仅在确实需要时授予 `publish` 或 `admin`。
+评论审核 token 可以批准、隐藏或移入回收站评论；永久删除评论需要 `admin` scope。
 
 ## 主要工具
 

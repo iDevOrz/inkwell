@@ -120,6 +120,12 @@ async fn static_asset(Path(path): Path<String>) -> Response {
 }
 
 async fn security_headers(request: Request<Body>, next: Next) -> Response {
+    let path = request.uri().path();
+    let has_session =
+        crate::auth::cookie_value(request.headers(), crate::auth::SESSION_COOKIE).is_some();
+    let public_asset = path.starts_with("/static/") || path.starts_with("/media/");
+    let private_response =
+        !public_asset && (path.starts_with("/admin") || path == "/mcp" || has_session);
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -147,5 +153,8 @@ async fn security_headers(request: Request<Body>, next: Next) -> Response {
              form-action 'self'",
         ),
     );
+    if private_response {
+        headers.insert("cache-control", HeaderValue::from_static("no-store"));
+    }
     response
 }

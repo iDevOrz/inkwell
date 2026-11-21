@@ -12,6 +12,8 @@ pub async fn connect(config: &Config) -> Result<SqlitePool> {
         .with_context(|| format!("create data dir {}", config.data_dir.display()))?;
     std::fs::create_dir_all(config.uploads_dir())
         .with_context(|| format!("create uploads dir {}", config.uploads_dir().display()))?;
+    restrict_data_directory(&config.data_dir)?;
+    restrict_data_directory(&config.uploads_dir())?;
 
     let options = SqliteConnectOptions::from_str(&config.database_url)
         .with_context(|| format!("invalid DATABASE_URL: {}", config.database_url))?
@@ -39,4 +41,17 @@ pub async fn connect(config: &Config) -> Result<SqlitePool> {
         .context("run database migrations")?;
 
     Ok(pool)
+}
+
+#[cfg(unix)]
+fn restrict_data_directory(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("restrict data directory permissions {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn restrict_data_directory(_path: &std::path::Path) -> Result<()> {
+    Ok(())
 }

@@ -106,6 +106,27 @@ async fn blog_login_notes_and_mcp_smoke() {
     let state = app::build_state(test_config(temp.path()))
         .await
         .expect("build state");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(temp.path())
+                .expect("data dir metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(temp.path().join("uploads"))
+                .expect("uploads dir metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
     let router =
         app::router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
 
@@ -215,6 +236,10 @@ async fn blog_login_notes_and_mcp_smoke() {
         .await
         .expect("admin");
     assert_eq!(admin.status(), 200);
+    assert_eq!(
+        admin.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
     assert!(body_string(admin).await.contains("仪表盘"));
 
     // MCP initialize and note creation.
@@ -261,6 +286,13 @@ async fn blog_login_notes_and_mcp_smoke() {
     // Default MCP token cannot publish.
     let publish = mcp_tool(&router, "content_publish", json!({"id": note_id})).await;
     assert_eq!(publish["isError"], true);
+    let delete_comment = mcp_tool(
+        &router,
+        "comment_moderate",
+        json!({"id": 1, "action": "delete"}),
+    )
+    .await;
+    assert_eq!(delete_comment["isError"], true);
 
     // Promote the note into a draft post.
     let promoted = mcp_tool(

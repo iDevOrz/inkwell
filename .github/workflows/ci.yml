@@ -15,12 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  importer:
+    name: Test migration importer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/inkwell-import-venv"
+          "$RUNNER_TEMP/inkwell-import-venv/bin/pip" install -r scripts/requirements.txt
+
+      - name: Run importer safety tests
+        run: |
+          "$RUNNER_TEMP/inkwell-import-venv/bin/python" -m unittest discover -s scripts -p 'test_*.py'
+
   checks:
     name: Format, build, test, and lint
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install stable Rust
         run: rustup toolchain install stable --profile minimal --component clippy --component rustfmt
@@ -42,17 +58,62 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Verify Compose preserves deployment settings
+        env:
+          ADMIN_PASSWORD: ci-password
+          MCP_TOKEN_SCOPES: read
+          TRUST_PROXY_HEADERS: "true"
+        run: |
+          docker compose config --format json > "$RUNNER_TEMP/inkwell-compose.json"
+          python3 -c 'import json, os; env = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "inkwell-compose.json")))["services"]["inkwell"]["environment"]; assert env["MCP_TOKEN_SCOPES"] == "read", env["MCP_TOKEN_SCOPES"]; assert env["TRUST_PROXY_HEADERS"] == "true", env["TRUST_PROXY_HEADERS"]'
 
       - name: Build image
         run: docker build --tag inkwell:ci .
+
+      - name: Verify startup and data-volume persistence
+        run: |
+          volume="inkwell-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container="inkwell-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker volume create "$volume"
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run --detach --name "$container" \
+            --publish 127.0.0.1:38080:3000 \
+            --env ADMIN_PASSWORD=ci-password \
+            --env SITE_URL=http://127.0.0.1:38080 \
+            --mount "type=volume,src=$volume,dst=/app/data" \
+            inkwell:ci
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:38080/ > "$RUNNER_TEMP/inkwell-home.html"; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '欢迎使用 inkwell' "$RUNNER_TEMP/inkwell-home.html"
+          docker exec "$container" test -s /app/data/typecho.db
+
+          docker restart "$container"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:38080/ > "$RUNNER_TEMP/inkwell-home-after-restart.html"; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '欢迎使用 inkwell' "$RUNNER_TEMP/inkwell-home-after-restart.html"
+          docker exec "$container" test -s /app/data/typecho.db
 
   coverage:
     name: Generate test coverage report
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install stable Rust and LLVM tools
         run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
@@ -64,7 +125,7 @@ jobs:
         run: rustup run stable cargo llvm-cov --all-targets --lcov --output-path lcov.info
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-coverage-lcov
           path: lcov.info

@@ -139,6 +139,7 @@ pub struct ContentForm {
     pub title: String,
     pub slug: Option<String>,
     pub body: String,
+    pub expected_updated_at: Option<i64>,
     pub excerpt: Option<String>,
     pub status: Option<String>,
     pub visibility: Option<String>,
@@ -201,6 +202,7 @@ pub struct AnnotationActionForm {
 pub struct ProposalApplyForm {
     #[serde(rename = "_csrf")]
     pub csrf: Option<String>,
+    pub version: Option<i64>,
     pub force: Option<String>,
 }
 
@@ -729,6 +731,7 @@ fn form_from_view(view: &crate::models::ContentView) -> ContentFormView {
         title: view.content.title.clone(),
         slug: view.content.slug.clone(),
         body: view.content.body.clone(),
+        expected_updated_at: Some(view.content.updated_at),
         excerpt: view.content.excerpt.clone().unwrap_or_default(),
         status: view.content.status.clone(),
         visibility: view.content.visibility.clone(),
@@ -754,6 +757,7 @@ fn form_from_submission(form: &ContentForm, kind: &str) -> ContentFormView {
         title: form.title.clone(),
         slug: form.slug.clone().unwrap_or_default(),
         body: form.body.clone(),
+        expected_updated_at: form.expected_updated_at,
         excerpt: form.excerpt.clone().unwrap_or_default(),
         status: form
             .status
@@ -909,7 +913,7 @@ async fn content_update(
         category: Some(form.category.clone().unwrap_or_default()),
         tags: Some(parse_tags(form.tags.as_deref())),
         actor: format!("human:{}", session.user.id),
-        expected_updated_at: None,
+        expected_updated_at: form.expected_updated_at,
         revision_note: Some(
             if action == "publish" {
                 "发布"
@@ -1045,6 +1049,7 @@ async fn note_promote(
             slug: form.slug.filter(|value| !value.trim().is_empty()),
             status: status.to_string(),
             sync: form.sync.is_some(),
+            can_publish: true,
             actor: format!("human:{}", session.user.id),
         },
     )
@@ -1206,6 +1211,7 @@ fn annotation_view(
 fn proposal_view(proposal: &crate::models::ContentProposal, timezone_offset: i32) -> ProposalView {
     ProposalView {
         id: proposal.id,
+        version: proposal.version,
         content_id: proposal.content_id,
         title: proposal.title.clone(),
         summary: proposal.summary.clone().unwrap_or_default(),
@@ -1475,13 +1481,28 @@ async fn proposal_apply(
     if item.kind != kind {
         return Err(AppError::not_found("内容不存在"));
     }
-    proposal::apply(
+    let version = form
+        .version
+        .ok_or_else(|| AppError::bad_request("提案版本号缺失，请重新打开差异页面"))?;
+    match proposal::apply(
         &state.db,
         proposal_id,
+        version,
         &format!("human:{}", session.user.id),
         form.force.is_some(),
+        true,
     )
-    .await?;
+    .await
+    {
+        Ok(_) => {}
+        Err(AppError::Conflict(_)) => {
+            return Ok(Redirect::to(&format!(
+                "/admin/{kind_path}/{id}/proposals/{proposal_id}?error=proposal_changed"
+            ))
+            .into_response());
+        }
+        Err(error) => return Err(error),
+    }
     Ok(Redirect::to(&format!(
         "/admin/{kind_path}/{id}/edit?notice=proposal_applied"
     ))
@@ -2197,7 +2218,8 @@ async fn media_delete(
     verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
     if let Some(item) = media::get(&state.db, id).await? {
         if let Err(error) = state.storage.delete(&item.storage_key).await {
-            tracing::warn!(error = ?error, "delete upload file failed");
+            tracing::error!(error = ?error, media_id = id, "delete upload file failed");
+            return Err(AppError::internal("文件删除失败，媒体记录已保留，请重试"));
         }
         media::delete(&state.db, id).await?;
     }

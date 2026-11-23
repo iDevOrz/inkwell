@@ -16,6 +16,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import time
@@ -34,6 +35,7 @@ USER_AGENT = (
 )
 TZ = timezone(timedelta(hours=8))
 ALLOWED_IMAGE_EXT = {"png", "jpg", "jpeg", "gif", "webp", "avif"}
+IMPORT_PROBE_SETTING = "__inkwell_import_target_probe__"
 
 
 def slugify(value: str) -> str:
@@ -221,6 +223,7 @@ def article_to_markdown(
     conn: sqlite3.Connection,
     admin_id: int,
     no_images: bool,
+    dry_run: bool,
 ) -> str:
     # Remove the theme's appended "本文链接" block.
     for heading in content.find_all(["h1", "h2", "h3"]):
@@ -237,7 +240,11 @@ def article_to_markdown(
             if not src or src.startswith("data:"):
                 continue
             absolute = urljoin(article_url, src)
-            local = download_image(session, absolute, uploads_dir, conn, admin_id)
+            local = (
+                absolute
+                if dry_run
+                else download_image(session, absolute, uploads_dir, conn, admin_id)
+            )
             alt = image.get("alt", "").strip()
             token = f"IMAGEBLOCKTOKEN{index}XYZ"
             image_tokens[token] = f"![{alt}]({local})"
@@ -309,6 +316,7 @@ def parse_article(
     conn: sqlite3.Connection,
     admin_id: int,
     no_images: bool,
+    dry_run: bool,
 ) -> dict:
     response = fetch(session, url)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -346,7 +354,7 @@ def parse_article(
     if not content:
         raise RuntimeError("missing #post-content")
     markdown = article_to_markdown(
-        content, url, session, uploads_dir, conn, admin_id, no_images
+        content, url, session, uploads_dir, conn, admin_id, no_images, dry_run
     )
     if not markdown:
         raise RuntimeError("empty article body")
@@ -361,6 +369,85 @@ def parse_article(
         "tags": tags,
         "markdown": markdown,
     }
+
+
+def connect_database(db_path: Path, read_only: bool) -> sqlite3.Connection:
+    if read_only:
+        conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True, timeout=30)
+        conn.execute("PRAGMA query_only = ON")
+    else:
+        conn = sqlite3.connect(db_path, timeout=30)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
+
+
+def verify_instance_target(
+    conn: sqlite3.Connection,
+    db_path: Path,
+    session: requests.Session,
+    mcp_url: str,
+    token: str,
+) -> None:
+    local_instance = conn.execute(
+        "SELECT value FROM settings WHERE name = 'installation_id'"
+    ).fetchone()
+    local_runtime = conn.execute(
+        "SELECT value FROM settings WHERE name = 'runtime_id'"
+    ).fetchone()
+    if not local_instance or not local_runtime:
+        raise RuntimeError(
+            "database has no instance identity; start a current Inkwell instance and retry"
+        )
+    remote = mcp_tool(
+        session, mcp_url, token, "instance_info", {}
+    )
+    if (
+        remote.get("installation_id") != local_instance[0]
+        or remote.get("runtime_id") != local_runtime[0]
+    ):
+        raise RuntimeError(
+            "MCP endpoint and --db are different Inkwell instances; no import was started"
+        )
+
+    probe = secrets.token_urlsafe(24)
+    probe_conn = connect_database(db_path, read_only=False)
+    try:
+        probe_conn.execute(
+            "INSERT INTO settings(name, value) VALUES(?, ?) \
+             ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+            (IMPORT_PROBE_SETTING, probe),
+        )
+        probe_conn.commit()
+        remote_probe = mcp_tool(
+            session, mcp_url, token, "instance_info", {"probe": probe}
+        )
+        if not remote_probe.get("probe_matches"):
+            raise RuntimeError(
+                "MCP endpoint cannot see the local database probe; refusing a different database file"
+            )
+    finally:
+        try:
+            probe_conn.execute(
+                "DELETE FROM settings WHERE name = ? AND value = ?",
+                (IMPORT_PROBE_SETTING, probe),
+            )
+            probe_conn.commit()
+        finally:
+            probe_conn.close()
+
+
+def verify_created_draft(
+    conn: sqlite3.Connection,
+    content_id: int,
+    title: str,
+    slug: str,
+    body: str,
+) -> bool:
+    row = conn.execute(
+        "SELECT title, slug, body, status, visibility FROM contents WHERE id = ?",
+        (content_id,),
+    ).fetchone()
+    return row == (title, slug, body, "draft", "public")
 
 
 def main() -> int:
@@ -383,8 +470,8 @@ def main() -> int:
     if not db_path.exists():
         parser.error(f"database not found: {db_path}")
 
-    conn = sqlite3.connect(db_path, timeout=30)
-    conn.execute("PRAGMA busy_timeout = 30000")
+    # Keep the local database read-only until the MCP endpoint is verified.
+    conn = connect_database(db_path, read_only=True)
     admin_row = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
     if not admin_row:
         parser.error("no admin user found")
@@ -392,6 +479,18 @@ def main() -> int:
 
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
+
+    if not args.dry_run:
+        try:
+            verify_instance_target(conn, db_path, session, args.mcp_url, args.token)
+        except Exception as error:  # noqa: BLE001
+            parser.error(f"target verification failed before writing: {error}")
+        conn.close()
+        conn = connect_database(db_path, read_only=False)
+        admin_row = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        if not admin_row:
+            parser.error("no admin user found")
+        admin_id = admin_row[0]
 
     print(f"Discovering articles from {args.site}")
     urls = discover_articles(session, args.site)
@@ -413,6 +512,7 @@ def main() -> int:
                 conn,
                 admin_id,
                 args.no_images,
+                args.dry_run,
             )
         except Exception as error:  # noqa: BLE001
             failed += 1
@@ -460,6 +560,26 @@ def main() -> int:
                 },
             )
             content_id = int(result["id"])
+            if not verify_created_draft(
+                conn,
+                content_id,
+                article["title"],
+                result["slug"],
+                article["markdown"],
+            ):
+                try:
+                    mcp_tool(
+                        session,
+                        args.mcp_url,
+                        args.token,
+                        "content_delete",
+                        {"id": content_id},
+                    )
+                except Exception as cleanup_error:  # noqa: BLE001
+                    print(f"  warning: could not trash unverified remote draft: {cleanup_error}")
+                raise RuntimeError(
+                    "the created draft does not match --db; refusing to publish by ID"
+                )
         except Exception as error:  # noqa: BLE001
             failed += 1
             conn.rollback()
@@ -486,7 +606,8 @@ def main() -> int:
         imported += 1
         print(f"  imported id={content_id}, slug={result.get('slug')}")
 
-    conn.commit()
+    if not args.dry_run:
+        conn.commit()
     conn.close()
     print(
         f"Done. imported={imported}, skipped={skipped}, failed={failed}, "

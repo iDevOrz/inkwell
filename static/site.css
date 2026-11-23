@@ -1180,3 +1180,404 @@ html.dark .mermaid rect.note {
 .mermaid .node.owner .label-container path:last-child {
   stroke: rgba(236, 72, 153, 0.45) !important;
 }
+
+/* Editorial article reading experience */
+.reading-page {
+  --reading-paper: #f7f6f0;
+  --reading-ink: #202a27;
+  --reading-accent: #567761;
+  --reading-line: #dedfd5;
+  max-width: 1080px;
+  margin: 2.2rem auto 5rem;
+  color: var(--reading-ink);
+}
+
+html.dark .reading-page {
+  --reading-paper: #1d2420;
+  --reading-ink: #e8e9df;
+  --reading-accent: #a5c5a6;
+  --reading-line: #39433c;
+}
+
+.reading-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 2.2rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.reading-breadcrumb a {
+  color: var(--reading-ink);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.reading-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 720px) minmax(180px, 220px);
+  gap: clamp(2rem, 6vw, 5rem);
+  align-items: start;
+  justify-content: center;
+}
+
+.reading-main {
+  display: contents;
+}
+
+.reading-header {
+  margin-bottom: 2.8rem;
+}
+
+.reading-overline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 1.25rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.64rem;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+}
+
+.reading-overline-mark {
+  color: var(--reading-accent);
+}
+
+.reading-overline-rule {
+  width: 2rem;
+  height: 1px;
+  background: var(--reading-line);
+}
+
+.reading-post .reading-header h1 {
+  max-width: 15ch;
+  margin: 0 0 1.1rem;
+  color: var(--reading-ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    "Noto Serif SC", "Songti SC", serif;
+  font-size: clamp(2.65rem, 6.3vw, 4.6rem);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.reading-deck {
+  max-width: 58ch;
+  margin: 0 0 1.65rem;
+  color: hsl(var(--muted-foreground));
+  font-size: clamp(1rem, 1.7vw, 1.15rem);
+  line-height: 1.8;
+  text-wrap: pretty;
+}
+
+.reading-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.74rem;
+}
+
+.reading-meta > span:first-child {
+  color: var(--reading-ink);
+  font-weight: 600;
+}
+
+.reading-meta-separator {
+  color: var(--reading-accent);
+}
+
+.reading-taxonomy {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.reading-category,
+.reading-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 0.1rem 0.58rem;
+  border: 1px solid var(--reading-line);
+  border-radius: 999px;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.68rem;
+  text-decoration: none;
+}
+
+.reading-category {
+  border-color: color-mix(in srgb, var(--reading-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--reading-accent) 9%, transparent);
+  color: var(--reading-accent);
+  font-weight: 600;
+}
+
+.reading-category:hover,
+.reading-tag:hover {
+  border-color: var(--reading-accent);
+  color: var(--reading-accent);
+  text-decoration: none;
+}
+
+.reading-post .reading-prose {
+  color: var(--reading-ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.08rem;
+  line-height: 1.98;
+  overflow-wrap: anywhere;
+}
+
+.reading-prose h1,
+.reading-prose h2,
+.reading-prose h3,
+.reading-prose h4 {
+  color: var(--reading-ink);
+  font-family: var(--font-ui);
+  letter-spacing: -0.035em;
+  scroll-margin-top: 6rem;
+}
+
+.reading-prose h2 {
+  margin-top: 2.8rem;
+  padding-top: 0.4rem;
+  font-size: 1.55rem;
+}
+
+.reading-prose h3 {
+  margin-top: 2rem;
+  font-size: 1.18rem;
+}
+
+.reading-prose a {
+  color: var(--reading-accent);
+  text-decoration-color: color-mix(in srgb, var(--reading-accent) 45%, transparent);
+}
+
+.reading-prose blockquote {
+  border-left-color: var(--reading-accent);
+  color: hsl(var(--muted-foreground));
+}
+
+.reading-prose img {
+  border-color: var(--reading-line);
+  border-radius: 4px;
+}
+
+.reading-post-footer {
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top-color: var(--reading-line);
+}
+
+.reading-post-footer .post-nav-link {
+  border-color: var(--reading-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--reading-paper) 58%, transparent);
+}
+
+.reading-post-footer .post-nav-link:hover {
+  border-color: var(--reading-accent);
+}
+
+.reading-rail {
+  order: 1;
+  position: sticky;
+  top: 92px;
+  display: grid;
+  gap: 1.5rem;
+  padding-top: 0.35rem;
+}
+
+.reading-rail-card {
+  padding: 1.1rem 1rem 0.95rem;
+  border: 1px solid var(--reading-line);
+  border-top: 3px solid var(--reading-accent);
+  background: color-mix(in srgb, var(--reading-paper) 62%, transparent);
+}
+
+.reading-rail-kicker,
+.reading-section-kicker {
+  margin: 0;
+  color: var(--reading-accent);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.reading-facts {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1.15rem 0 1rem;
+}
+
+.reading-facts > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.reading-facts dt {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.68rem;
+}
+
+.reading-facts dd {
+  margin: 0;
+  color: var(--reading-ink);
+  font-size: 0.79rem;
+  font-weight: 550;
+}
+
+.reading-rail-link {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.68rem 0;
+  border-top: 1px solid var(--reading-line);
+  color: var(--reading-ink);
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.reading-rail-link span {
+  color: var(--reading-accent);
+}
+
+.reading-rail-link:hover {
+  color: var(--reading-accent);
+}
+
+.reading-rail-tags {
+  padding-top: 0.3rem;
+}
+
+.reading-rail-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  margin-top: 0.7rem;
+}
+
+.reading-rail-tag-list a {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.7rem;
+}
+
+.reading-rail-note {
+  margin: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--reading-line);
+  color: hsl(var(--muted-foreground));
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    "Noto Serif SC", "Songti SC", serif;
+  font-size: 0.96rem;
+  font-style: italic;
+  line-height: 1.65;
+}
+
+.reading-comments {
+  grid-column: 1;
+  order: 2;
+  margin-top: 0;
+  padding-top: 1.8rem;
+  border-top: 1px solid var(--reading-line);
+}
+
+.reading-section-heading {
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 1.4rem;
+  padding-bottom: 0.9rem;
+  border-bottom-color: var(--reading-line);
+}
+
+.reading-section-heading h2 {
+  margin-top: 0.25rem;
+  color: var(--reading-ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.55rem;
+  font-weight: 500;
+}
+
+.reading-section-heading .count {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.7rem;
+}
+
+.reading-empty-comments {
+  padding: 0.8rem 0;
+  font-size: 0.84rem;
+}
+
+.reading-comment-form {
+  border-color: var(--reading-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--reading-paper) 55%, transparent);
+}
+
+@media (max-width: 900px) {
+  .reading-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+  }
+
+  .reading-rail {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reading-rail-card {
+    grid-row: span 2;
+  }
+}
+
+@media (max-width: 600px) {
+  .reading-page {
+    margin-top: 1.25rem;
+    margin-bottom: 3rem;
+  }
+
+  .reading-breadcrumb {
+    margin-bottom: 1.4rem;
+  }
+
+  .reading-header {
+    margin-bottom: 2rem;
+  }
+
+  .reading-post .reading-header h1 {
+    font-size: clamp(2.35rem, 13vw, 3.4rem);
+  }
+
+  .reading-post .reading-prose {
+    font-size: 1rem;
+    line-height: 1.9;
+  }
+
+  .reading-meta {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+  }
+
+  .reading-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .reading-rail-card {
+    grid-row: auto;
+  }
+
+  .reading-section-heading {
+    align-items: start;
+  }
+}

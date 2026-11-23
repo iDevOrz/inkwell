@@ -3,13 +3,12 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash};
 use axum::extract::FromRequestParts;
 use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use rand::RngCore;
 use sqlx::{FromRow, SqlitePool};
 
 use crate::error::{AppError, AppResult};
@@ -82,11 +81,8 @@ impl FromRequestParts<AppState> for AdminSession {
 }
 
 pub fn hash_password(password: &str) -> AppResult<String> {
-    let mut salt_bytes = [0_u8; 16];
-    rand::rng().fill_bytes(&mut salt_bytes);
-    let salt = SaltString::encode_b64(&salt_bytes)?;
     Ok(Argon2::default()
-        .hash_password(password.as_bytes(), &salt)?
+        .hash_password(password.as_bytes())?
         .to_string())
 }
 

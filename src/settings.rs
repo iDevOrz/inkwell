@@ -4,7 +4,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::error::AppResult;
-use crate::util::parse_bool;
+use crate::util::{parse_bool, random_token};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SiteSettings {
@@ -63,6 +63,7 @@ pub async fn ensure_defaults(pool: &SqlitePool, site_url: &str) -> AppResult<()>
             bool_value(defaults.comments_require_email),
         ),
         ("feed_full_text", bool_value(defaults.feed_full_text)),
+        ("installation_id", random_token(24)),
     ];
 
     for (name, value) in values {
@@ -72,6 +73,14 @@ pub async fn ensure_defaults(pool: &SqlitePool, site_url: &str) -> AppResult<()>
             .execute(pool)
             .await?;
     }
+
+    sqlx::query(
+        "INSERT INTO settings(name, value) VALUES('runtime_id', ?) \
+         ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+    )
+    .bind(random_token(24))
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

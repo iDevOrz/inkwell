@@ -132,6 +132,7 @@ pub struct ContentFormView {
     pub title: String,
     pub slug: String,
     pub body: String,
+    pub expected_updated_at: Option<i64>,
     pub excerpt: String,
     pub status: String,
     pub visibility: String,
@@ -148,6 +149,7 @@ impl ContentFormView {
             title: String::new(),
             slug: String::new(),
             body: String::new(),
+            expected_updated_at: None,
             excerpt: String::new(),
             status: crate::models::default_status(kind).to_string(),
             visibility: if kind == "note" {
@@ -257,6 +259,7 @@ pub struct AnnotationsTemplate {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProposalView {
     pub id: i64,
+    pub version: i64,
     pub content_id: i64,
     pub title: String,
     pub summary: String,

@@ -55,6 +55,14 @@ fn tool_error(message: impl Into<String>) -> CallToolResult {
 pub fn definitions() -> Value {
     let tools = vec![
         tool(
+            "instance_info",
+            "Return opaque installation and runtime IDs so migration tools can verify their SQLite target matches this MCP server. An optional probe checks the exact database file. Requires write scope.",
+            json!({
+                "probe": {"type": "string", "description": "Optional one-time migration target probe"}
+            }),
+            &[],
+        ),
+        tool(
             "content_list",
             "List posts, pages and notes. Returns summaries without the full body.",
             json!({
@@ -319,24 +327,26 @@ pub fn definitions() -> Value {
         ),
         tool(
             "proposal_update",
-            "Update a proposed version in place before the human reviews it. Does not change the live content.",
+            "Create a new immutable version of a proposed edit. Supply the version returned by proposal_get; does not change live content.",
             json!({
                 "id": {"type": "integer"},
+                "version": {"type": "integer", "description": "Current proposal version returned by proposal_get"},
                 "title": {"type": "string"},
                 "body": {"type": "string"},
                 "excerpt": {"type": "string"},
                 "summary": {"type": "string"}
             }),
-            &["id"],
+            &["id", "version"],
         ),
         tool(
             "proposal_apply",
-            "Apply a proposed version to the live content, creating a normal revision. Requires publish for already-published content.",
+            "Apply exactly the proposal version you reviewed. Supply its version from proposal_get; stale versions are rejected. Requires publish for already-published content.",
             json!({
                 "id": {"type": "integer"},
+                "version": {"type": "integer", "description": "Exact proposal version reviewed"},
                 "force": {"type": "boolean", "default": false}
             }),
-            &["id"],
+            &["id", "version"],
         ),
         tool(
             "proposal_reject",
@@ -404,6 +414,7 @@ pub async fn call(
     args: Value,
 ) -> CallToolResult {
     let result = match name {
+        "instance_info" => instance_info(state, principal, &args).await,
         "content_list" => content_list(state, principal, &args).await,
         "content_get" => content_get(state, principal, &args).await,
         "content_create" => content_create(state, principal, &args).await,
@@ -443,6 +454,43 @@ pub async fn call(
         Ok(value) => ok(value),
         Err(error) => tool_error(error.to_string()),
     }
+}
+
+async fn instance_info(
+    state: &AppState,
+    principal: &McpPrincipal,
+    args: &Value,
+) -> AppResult<Value> {
+    require(principal, "write")?;
+    let values: Vec<(String, String)> = sqlx::query_as(
+        "SELECT name, value FROM settings WHERE name IN ('installation_id', 'runtime_id')",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let values: std::collections::HashMap<String, String> = values.into_iter().collect();
+    let installation_id = values
+        .get("installation_id")
+        .ok_or_else(|| AppError::internal("installation ID is missing"))?;
+    let runtime_id = values
+        .get("runtime_id")
+        .ok_or_else(|| AppError::internal("runtime ID is missing"))?;
+    let probe_matches = if let Some(probe) = arg_str(args, "probe") {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM settings \
+             WHERE name = '__inkwell_import_target_probe__' AND value = ?)",
+        )
+        .bind(probe)
+        .fetch_one(&state.db)
+        .await?
+            != 0
+    } else {
+        false
+    };
+    Ok(json!({
+        "installation_id": installation_id,
+        "runtime_id": runtime_id,
+        "probe_matches": probe_matches
+    }))
 }
 
 async fn content_list(
@@ -548,7 +596,9 @@ async fn content_update(
         require(principal, "publish")?;
     }
     let patch = build_patch(args, principal);
-    let content = content::update(&state.db, id, patch).await?;
+    let content =
+        content::update_with_publish_permission(&state.db, id, patch, principal.has("publish"))
+            .await?;
     Ok(json!({
         "id": content.id,
         "kind": content.kind,
@@ -750,6 +800,7 @@ async fn note_promote(
             slug: arg_str(args, "slug"),
             status,
             sync: arg_bool(args, "sync").unwrap_or(false),
+            can_publish: principal.has("publish"),
             actor: principal.actor(),
         },
     )
@@ -1063,9 +1114,12 @@ async fn proposal_update(
 ) -> AppResult<Value> {
     require(principal, "write")?;
     let id = required_i64(args, "id")?;
+    let version =
+        arg_i64(args, "version").ok_or_else(|| AppError::bad_request("version 必须是整数"))?;
     let item = proposal::update(
         &state.db,
         id,
+        version,
         arg_str(args, "title"),
         arg_str(args, "body"),
         arg_str(args, "excerpt"),
@@ -1081,6 +1135,8 @@ async fn proposal_apply(
     args: &Value,
 ) -> AppResult<Value> {
     let id = required_i64(args, "id")?;
+    let version =
+        arg_i64(args, "version").ok_or_else(|| AppError::bad_request("version 必须是整数"))?;
     let proposal = proposal::get(&state.db, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;
@@ -1093,7 +1149,15 @@ async fn proposal_apply(
         require(principal, "write")?;
     }
     let force = arg_bool(args, "force").unwrap_or(false);
-    let (proposal, content) = proposal::apply(&state.db, id, &principal.actor(), force).await?;
+    let (proposal, content) = proposal::apply(
+        &state.db,
+        id,
+        version,
+        &principal.actor(),
+        force,
+        principal.has("publish"),
+    )
+    .await?;
     Ok(json!({
         "proposal": proposal,
         "content": {

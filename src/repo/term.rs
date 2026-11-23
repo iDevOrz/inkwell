@@ -17,10 +17,47 @@ pub async fn list(pool: &SqlitePool, kind: &str) -> AppResult<Vec<TermWithCount>
     Ok(rows)
 }
 
+pub async fn list_public(pool: &SqlitePool, kind: &str) -> AppResult<Vec<TermWithCount>> {
+    Ok(sqlx::query_as::<_, TermWithCount>(
+        "SELECT t.id, t.kind, t.name, t.slug, t.description, t.parent_id, t.created_at, \
+                COUNT(DISTINCT c.id) AS count \
+         FROM terms t \
+         JOIN content_terms ct ON ct.term_id = t.id \
+         JOIN contents c ON c.id = ct.content_id \
+         WHERE t.kind = ? AND c.kind = 'post' AND c.status = 'published' \
+           AND c.visibility = 'public' AND c.deleted_at IS NULL \
+         GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+    )
+    .bind(kind)
+    .fetch_all(pool)
+    .await?)
+}
+
 pub async fn get_by_slug(pool: &SqlitePool, kind: &str, slug: &str) -> AppResult<Option<Term>> {
     Ok(sqlx::query_as::<_, Term>(
         "SELECT id, kind, name, slug, description, parent_id, created_at \
          FROM terms WHERE kind = ? AND slug = ?",
+    )
+    .bind(kind)
+    .bind(slug)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub async fn get_public_by_slug(
+    pool: &SqlitePool,
+    kind: &str,
+    slug: &str,
+) -> AppResult<Option<Term>> {
+    Ok(sqlx::query_as::<_, Term>(
+        "SELECT t.id, t.kind, t.name, t.slug, t.description, t.parent_id, t.created_at \
+         FROM terms t \
+         WHERE t.kind = ? AND t.slug = ? AND EXISTS ( \
+             SELECT 1 FROM content_terms ct \
+             JOIN contents c ON c.id = ct.content_id \
+             WHERE ct.term_id = t.id AND c.kind = 'post' AND c.status = 'published' \
+               AND c.visibility = 'public' AND c.deleted_at IS NULL \
+         )",
     )
     .bind(kind)
     .bind(slug)

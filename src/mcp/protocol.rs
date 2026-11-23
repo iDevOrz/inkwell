@@ -154,7 +154,7 @@ fn initialize_result(params: &Value) -> Value {
             "name": "inkwell",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Typecho-rs blog and notes server. AI can read and write drafts/notes, submit content for review, and moderate comments. For collaborative editing, use annotation_queue to pull open annotations, read the content with content_get, create a proposed version with proposal_create (do not create a separate draft article), then reply to each annotation with annotation_reply and the proposal id. The human reviews the proposal diff and applies or rejects it. Publishing requires an explicit publish-scoped token."
+        "instructions": "Inkwell blog and notes server. AI can read and write drafts/notes, submit content for review, and moderate comments. For collaborative editing, use annotation_queue to pull open annotations, read the content with content_get, create a proposed version with proposal_create (do not create a separate draft article), then reply to each annotation with annotation_reply and the proposal id. The human reviews the proposal diff and applies or rejects the exact version shown. If proposal_get or proposal_update returns version N, pass N to proposal_apply or proposal_update; stale versions are rejected. Publishing requires an explicit publish-scoped token."
     })
 }
 

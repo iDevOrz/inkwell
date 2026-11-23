@@ -100,6 +100,7 @@ pub struct PromoteOptions {
     pub slug: Option<String>,
     pub status: String,
     pub sync: bool,
+    pub can_publish: bool,
     pub actor: String,
 }
 
@@ -143,7 +144,7 @@ pub async fn list(
     Ok((items, total))
 }
 
-fn push_filters(query: &mut QueryBuilder<'_, Sqlite>, filter: &ContentFilter) {
+fn push_filters(query: &mut QueryBuilder<Sqlite>, filter: &ContentFilter) {
     if let Some(kind) = filter.kind.as_deref().filter(|value| *value != "all") {
         query.push(" AND c.kind = ").push_bind(kind.to_string());
     }
@@ -752,9 +753,22 @@ pub async fn create(pool: &SqlitePool, input: ContentInput) -> AppResult<i64> {
 }
 
 pub async fn update(pool: &SqlitePool, id: i64, patch: ContentPatch) -> AppResult<Content> {
+    update_with_publish_permission(pool, id, patch, true).await
+}
+
+pub async fn update_with_publish_permission(
+    pool: &SqlitePool,
+    id: i64,
+    patch: ContentPatch,
+    can_publish: bool,
+) -> AppResult<Content> {
     let current = get_by_id(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
+
+    if current.status == "published" && !can_publish {
+        return Err(AppError::forbidden("修改已发布文章需要 publish 权限"));
+    }
 
     if let Some(expected) = patch.expected_updated_at
         && current.updated_at != expected
@@ -816,7 +830,7 @@ pub async fn update(pool: &SqlitePool, id: i64, patch: ContentPatch) -> AppResul
         None => current.excerpt.clone(),
     };
 
-    let now = now_ts();
+    let now = now_ts().max(current.updated_at.saturating_add(1));
     let published_at = if status == "published" {
         current.published_at.or(Some(now))
     } else {
@@ -833,10 +847,11 @@ pub async fn update(pool: &SqlitePool, id: i64, patch: ContentPatch) -> AppResul
         .unwrap_or(current.allow_comments);
 
     let mut transaction = pool.begin().await?;
-    sqlx::query(
+    let update = sqlx::query(
         "UPDATE contents SET title = ?, slug = ?, body = ?, excerpt = ?, status = ?, \
                 visibility = ?, updated_at = ?, published_at = ?, review_status = ?, \
-                review_notes = ?, allow_comments = ?, deleted_at = ? WHERE id = ?",
+                review_notes = ?, allow_comments = ?, deleted_at = ? \
+         WHERE id = ? AND updated_at = ? AND (? OR status != 'published')",
     )
     .bind(&title)
     .bind(&slug)
@@ -851,8 +866,13 @@ pub async fn update(pool: &SqlitePool, id: i64, patch: ContentPatch) -> AppResul
     .bind(allow_comments)
     .bind(deleted_at)
     .bind(id)
+    .bind(current.updated_at)
+    .bind(can_publish)
     .execute(&mut *transaction)
     .await?;
+    if update.rows_affected() != 1 {
+        return Err(AppError::conflict("内容已被其他人修改，请重新读取后再提交"));
+    }
 
     if let Some(tags) = &patch.tags {
         term::set_tags_tx(&mut transaction, id, tags).await?;
@@ -883,6 +903,91 @@ pub async fn update(pool: &SqlitePool, id: i64, patch: ContentPatch) -> AppResul
     get_by_id(pool, id)
         .await?
         .ok_or_else(|| AppError::internal("更新后读取内容失败"))
+}
+
+pub(super) async fn get_by_id_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> AppResult<Option<Content>> {
+    Ok(sqlx::query_as::<_, Content>(
+        "SELECT id, kind, title, slug, body, excerpt, status, visibility, author_id, created_at, \
+                updated_at, published_at, review_status, review_notes, allow_comments, \
+                source_note_id, promoted_to_id, metadata, deleted_at \
+         FROM contents WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut **transaction)
+    .await?)
+}
+
+pub(super) struct ProposalContentUpdate<'a> {
+    pub title: &'a str,
+    pub body: &'a str,
+    pub excerpt: Option<&'a str>,
+    pub actor: &'a str,
+    pub revision_note: &'a str,
+    pub can_publish: bool,
+}
+
+pub(super) async fn apply_proposal_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    current: &Content,
+    update: ProposalContentUpdate<'_>,
+) -> AppResult<(Content, i64)> {
+    if current.status == "published" && !update.can_publish {
+        return Err(AppError::forbidden("修改已发布文章需要 publish 权限"));
+    }
+
+    let title = if update.title.trim().is_empty() {
+        current.title.clone()
+    } else {
+        update.title.trim().to_string()
+    };
+    let body = update.body.trim();
+    if body.is_empty() {
+        return Err(AppError::bad_request("版本正文不能为空"));
+    }
+    let excerpt = match update.excerpt {
+        Some(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        _ => Some(markdown::excerpt(body, 240)),
+    };
+    let now = now_ts().max(current.updated_at.saturating_add(1));
+
+    let result = sqlx::query(
+        "UPDATE contents SET title = ?, body = ?, excerpt = ?, updated_at = ? \
+         WHERE id = ? AND updated_at = ? AND (? OR status != 'published')",
+    )
+    .bind(&title)
+    .bind(body)
+    .bind(&excerpt)
+    .bind(now)
+    .bind(current.id)
+    .bind(current.updated_at)
+    .bind(update.can_publish)
+    .execute(&mut **transaction)
+    .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::conflict("内容已被其他人修改，请重新读取后再提交"));
+    }
+
+    if body != current.body {
+        sync_links_tx(transaction, current.id, body).await?;
+    }
+    let revision_id = revision::insert_tx(
+        transaction,
+        current.id,
+        &title,
+        body,
+        &current.status,
+        update.actor,
+        Some(update.revision_note),
+        now,
+    )
+    .await?;
+    let updated = get_by_id_in_transaction(transaction, current.id)
+        .await?
+        .ok_or_else(|| AppError::internal("应用版本后读取内容失败"))?;
+    Ok((updated, revision_id))
 }
 
 pub async fn publish(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Content> {
@@ -967,7 +1072,7 @@ pub async fn set_review(
     let current = get_by_id(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
-    let now = now_ts();
+    let now = now_ts().max(current.updated_at.saturating_add(1));
     let notes = review_notes
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -1031,7 +1136,7 @@ pub async fn promote_note(
                 .iter()
                 .find(|term| term.kind == "category")
                 .map(|term| term.name.clone());
-            update(
+            update_with_publish_permission(
                 pool,
                 post.id,
                 ContentPatch {
@@ -1044,6 +1149,7 @@ pub async fn promote_note(
                     revision_note: Some("从笔记同步".to_string()),
                     ..Default::default()
                 },
+                options.can_publish,
             )
             .await?;
         }
@@ -1059,6 +1165,9 @@ pub async fn promote_note(
     } else {
         "draft"
     };
+    if status == "published" && !options.can_publish {
+        return Err(AppError::forbidden("发布文章需要 publish 权限"));
+    }
     let terms = term::terms_for_contents(pool, &[note.id]).await?;
     let terms = terms.get(&note.id).cloned().unwrap_or_default();
     let tags: Vec<String> = terms
@@ -1115,7 +1224,7 @@ pub async fn promote_note(
         .await?
         .ok_or_else(|| AppError::internal("转为文章后读取失败"))?;
 
-    let now = now_ts();
+    let now = now_ts().max(note.updated_at.saturating_add(1));
     sqlx::query("UPDATE contents SET promoted_to_id = ?, updated_at = ? WHERE id = ?")
         .bind(post_id)
         .bind(now)
@@ -1204,7 +1313,7 @@ async fn sync_links_tx(
     Ok(())
 }
 
-async fn resolve_pending_links(
+pub(super) async fn resolve_pending_links(
     pool: &SqlitePool,
     target_id: i64,
     title: &str,

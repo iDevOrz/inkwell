@@ -177,6 +177,7 @@ pub const PROPOSAL_STATUSES: &[&str] = &["proposed", "applied", "rejected"];
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct ContentProposal {
     pub id: i64,
+    pub version: i64,
     pub content_id: i64,
     pub base_revision_id: Option<i64>,
     pub base_updated_at: i64,

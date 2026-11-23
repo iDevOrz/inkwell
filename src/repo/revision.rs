@@ -13,8 +13,8 @@ pub async fn insert_tx(
     actor: &str,
     note: Option<&str>,
     created_at: i64,
-) -> AppResult<()> {
-    sqlx::query(
+) -> AppResult<i64> {
+    let result = sqlx::query(
         "INSERT INTO revisions(content_id, title, body, status, actor, note, created_at) \
          VALUES(?, ?, ?, ?, ?, ?, ?)",
     )
@@ -27,7 +27,7 @@ pub async fn insert_tx(
     .bind(created_at)
     .execute(&mut **transaction)
     .await?;
-    Ok(())
+    Ok(result.last_insert_rowid())
 }
 
 pub async fn list(pool: &SqlitePool, content_id: i64, limit: i64) -> AppResult<Vec<Revision>> {

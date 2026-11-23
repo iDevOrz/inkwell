@@ -1,9 +1,10 @@
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Content, ContentProposal};
-use crate::repo::content::{self, ContentPatch};
+use crate::repo::content;
 use crate::util::now_ts;
+use sqlx::{FromRow, Transaction};
 
 #[derive(Debug, Clone)]
 pub struct ProposalInput {
@@ -14,6 +15,14 @@ pub struct ProposalInput {
     pub excerpt: Option<String>,
     pub summary: Option<String>,
     pub author: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct ProposalVersion {
+    title: String,
+    body: String,
+    excerpt: Option<String>,
+    summary: Option<String>,
 }
 
 pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<ContentProposal> {
@@ -59,6 +68,7 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
     };
 
     let now = now_ts();
+    let mut transaction = pool.begin().await?;
     let result = sqlx::query(
         "INSERT INTO content_proposals(content_id, base_revision_id, base_updated_at, title, \
                 body, excerpt, summary, status, author, created_at) \
@@ -67,23 +77,40 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
     .bind(input.content_id)
     .bind(base_revision_id)
     .bind(current.updated_at)
-    .bind(title)
+    .bind(&title)
     .bind(body)
     .bind(input.excerpt.as_deref())
     .bind(input.summary.as_deref())
     .bind(&input.author)
     .bind(now)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
 
-    get(pool, result.last_insert_rowid())
+    let proposal_id = result.last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO content_proposal_versions( \
+             proposal_id, version, title, body, excerpt, summary, author, created_at \
+         ) VALUES(?, 1, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(proposal_id)
+    .bind(&title)
+    .bind(body)
+    .bind(input.excerpt.as_deref())
+    .bind(input.summary.as_deref())
+    .bind(&input.author)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+
+    get(pool, proposal_id)
         .await?
         .ok_or_else(|| AppError::internal("创建版本后读取失败"))
 }
 
 pub async fn get(pool: &SqlitePool, id: i64) -> AppResult<Option<ContentProposal>> {
     Ok(sqlx::query_as::<_, ContentProposal>(
-        "SELECT id, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
+        "SELECT id, version, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
                 summary, status, author, created_at, resolved_at, decision_note, \
                 applied_revision_id \
          FROM content_proposals WHERE id = ?",
@@ -98,22 +125,21 @@ pub async fn list_for_content(
     content_id: i64,
     status: Option<&str>,
 ) -> AppResult<Vec<ContentProposal>> {
-    let mut sql = String::from(
-        "SELECT id, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT id, version, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
                 summary, status, author, created_at, resolved_at, decision_note, \
                 applied_revision_id \
-         FROM content_proposals WHERE content_id = ?",
+         FROM content_proposals WHERE content_id = ",
     );
-    if status.is_some() {
-        sql.push_str(" AND status = ?");
-    }
-    sql.push_str(" ORDER BY created_at DESC, id DESC");
-
-    let mut query = sqlx::query_as::<_, ContentProposal>(&sql).bind(content_id);
+    query.push_bind(content_id);
     if let Some(status) = status {
-        query = query.bind(status);
+        query.push(" AND status = ").push_bind(status);
     }
-    Ok(query.fetch_all(pool).await?)
+    query.push(" ORDER BY created_at DESC, id DESC");
+    Ok(query
+        .build_query_as::<ContentProposal>()
+        .fetch_all(pool)
+        .await?)
 }
 
 pub async fn latest_proposed(
@@ -121,7 +147,7 @@ pub async fn latest_proposed(
     content_id: i64,
 ) -> AppResult<Option<ContentProposal>> {
     Ok(sqlx::query_as::<_, ContentProposal>(
-        "SELECT id, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
+        "SELECT id, version, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
                 summary, status, author, created_at, resolved_at, decision_note, \
                 applied_revision_id \
          FROM content_proposals WHERE content_id = ? AND status = 'proposed' \
@@ -135,16 +161,21 @@ pub async fn latest_proposed(
 pub async fn update(
     pool: &SqlitePool,
     id: i64,
+    expected_version: i64,
     title: Option<String>,
     body: Option<String>,
     excerpt: Option<String>,
     summary: Option<String>,
 ) -> AppResult<ContentProposal> {
-    let current = get(pool, id)
+    let mut transaction = pool.begin().await?;
+    let current = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;
     if current.status != "proposed" {
         return Err(AppError::bad_request("这个版本已经处理过了"));
+    }
+    if current.version != expected_version {
+        return Err(AppError::conflict("提案在读取后已更新，请重新读取后再编辑"));
     }
 
     let title = title
@@ -170,17 +201,42 @@ pub async fn update(
         None => current.summary.clone(),
     };
 
-    sqlx::query(
-        "UPDATE content_proposals SET title = ?, body = ?, excerpt = ?, summary = ? \
-         WHERE id = ? AND status = 'proposed'",
+    let next_version = current.version + 1;
+    let now = now_ts();
+    let update = sqlx::query(
+        "UPDATE content_proposals SET title = ?, body = ?, excerpt = ?, summary = ?, \
+                version = ? \
+         WHERE id = ? AND status = 'proposed' AND version = ?",
     )
-    .bind(title)
-    .bind(body)
-    .bind(excerpt)
-    .bind(summary)
+    .bind(&title)
+    .bind(&body)
+    .bind(&excerpt)
+    .bind(&summary)
+    .bind(next_version)
     .bind(id)
-    .execute(pool)
+    .bind(current.version)
+    .execute(&mut *transaction)
     .await?;
+    if update.rows_affected() != 1 {
+        return Err(AppError::conflict("提案在读取后已更新，请重新读取后再编辑"));
+    }
+
+    sqlx::query(
+        "INSERT INTO content_proposal_versions( \
+             proposal_id, version, title, body, excerpt, summary, author, created_at \
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(next_version)
+    .bind(&title)
+    .bind(&body)
+    .bind(&excerpt)
+    .bind(&summary)
+    .bind(&current.author)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
 
     get(pool, id)
         .await?
@@ -190,16 +246,27 @@ pub async fn update(
 pub async fn apply(
     pool: &SqlitePool,
     id: i64,
+    expected_version: i64,
     actor: &str,
     force: bool,
+    can_publish: bool,
 ) -> AppResult<(ContentProposal, Content)> {
-    let proposal = get(pool, id)
+    let mut transaction = pool.begin().await?;
+    let proposal = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;
     if proposal.status != "proposed" {
         return Err(AppError::bad_request("这个版本已经处理过了"));
     }
-    let current = content::get_by_id(pool, proposal.content_id)
+    if proposal.version != expected_version {
+        return Err(AppError::conflict(
+            "提案在预览后已更新，请检查最新差异后再应用",
+        ));
+    }
+    let snapshot = get_version_in_transaction(&mut transaction, id, expected_version)
+        .await?
+        .ok_or_else(|| AppError::internal("提案版本记录不存在"))?;
+    let current = content::get_by_id_in_transaction(&mut transaction, proposal.content_id)
         .await?
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
     if !force && current.updated_at != proposal.base_updated_at {
@@ -208,53 +275,84 @@ pub async fn apply(
         ));
     }
 
-    let summary = proposal
+    let summary = snapshot
         .summary
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| format!("：{value}"))
         .unwrap_or_default();
-    let patch = ContentPatch {
-        title: Some(proposal.title.clone()),
-        slug: None,
-        body: Some(proposal.body.clone()),
-        excerpt: proposal.excerpt.clone(),
-        status: None,
-        visibility: None,
-        review_status: None,
-        review_notes: None,
-        allow_comments: None,
-        category: None,
-        tags: None,
-        actor: actor.to_string(),
-        expected_updated_at: (!force).then_some(proposal.base_updated_at),
-        revision_note: Some(format!("应用 AI 版本 #{id}{summary}")),
-    };
-    let updated = content::update(pool, proposal.content_id, patch).await?;
-    let applied_revision_id: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM revisions WHERE content_id = ? ORDER BY id DESC LIMIT 1",
+    let revision_note = format!("应用 AI 版本 #{id}{summary}");
+    let (updated, applied_revision_id) = content::apply_proposal_in_transaction(
+        &mut transaction,
+        &current,
+        content::ProposalContentUpdate {
+            title: &snapshot.title,
+            body: &snapshot.body,
+            excerpt: snapshot.excerpt.as_deref(),
+            actor,
+            revision_note: &revision_note,
+            can_publish,
+        },
     )
-    .bind(proposal.content_id)
-    .fetch_optional(pool)
     .await?;
 
     let now = now_ts();
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE content_proposals SET status = 'applied', resolved_at = ?, \
-                decision_note = ?, applied_revision_id = ? WHERE id = ?",
+                decision_note = ?, applied_revision_id = ? \
+         WHERE id = ? AND status = 'proposed' AND version = ?",
     )
     .bind(now)
     .bind("已应用")
     .bind(applied_revision_id)
     .bind(id)
-    .execute(pool)
+    .bind(expected_version)
+    .execute(&mut *transaction)
     .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::conflict("提案状态已变化，请重新读取后再试"));
+    }
 
-    let proposal = get(pool, id)
+    let proposal = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::internal("应用版本后读取失败"))?;
+    transaction.commit().await?;
+
+    if current.kind == "note" && updated.title != current.title {
+        content::resolve_pending_links(pool, updated.id, &updated.title, &updated.slug).await?;
+    }
     Ok((proposal, updated))
+}
+
+async fn get_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> AppResult<Option<ContentProposal>> {
+    Ok(sqlx::query_as::<_, ContentProposal>(
+        "SELECT id, version, content_id, base_revision_id, base_updated_at, title, body, excerpt, \
+                summary, status, author, created_at, resolved_at, decision_note, \
+                applied_revision_id \
+         FROM content_proposals WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut **transaction)
+    .await?)
+}
+
+async fn get_version_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    proposal_id: i64,
+    version: i64,
+) -> AppResult<Option<ProposalVersion>> {
+    Ok(sqlx::query_as::<_, ProposalVersion>(
+        "SELECT title, body, excerpt, summary \
+         FROM content_proposal_versions WHERE proposal_id = ? AND version = ?",
+    )
+    .bind(proposal_id)
+    .bind(version)
+    .fetch_optional(&mut **transaction)
+    .await?)
 }
 
 pub async fn reject(pool: &SqlitePool, id: i64, note: Option<&str>) -> AppResult<ContentProposal> {

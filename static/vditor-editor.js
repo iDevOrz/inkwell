@@ -13,6 +13,7 @@
   const csrf = csrfInput ? csrfInput.value : "";
   const form = root.closest("form");
   const isDark = document.documentElement.classList.contains("dark");
+  const isCompact = window.matchMedia("(max-width: 760px)").matches;
 
   let vditor;
 
@@ -22,7 +23,7 @@
       lang: "zh_CN",
       icon: "ant",
       theme: isDark ? "dark" : "classic",
-      mode: "sv",
+      mode: isCompact ? "ir" : "sv",
       height: "calc(100vh - 280px)",
       minHeight: 600,
       value: textarea.value,

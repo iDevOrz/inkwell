@@ -9,7 +9,8 @@ services:
       ADMIN_USER: "admin"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}"
       MCP_TOKEN: "${MCP_TOKEN:-}"
-      MCP_TOKEN_SCOPES: "read,write,review"
+      MCP_TOKEN_SCOPES: "${MCP_TOKEN_SCOPES:-read,write,review}"
+      TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-false}"
       RUST_LOG: "inkwell=info,tower_http=info"
     volumes:
       - ./data:/app/data

@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use crate::auth::OptionalUser;
 use crate::error::{AppError, AppResult};
 use crate::models::{Pagination, TimelinePost};
-use crate::repo::{comment, content, term};
+use crate::repo::{comment, content, media, term};
 use crate::state::AppState;
 use crate::util::{
     client_ip, format_date, format_iso, format_month, now_ts, timezone, user_agent, xml_escape,
@@ -208,7 +208,7 @@ pub async fn category(
     )
     .await?;
     let site = ctx.site.clone();
-    let Some(term) = term::get_by_slug(&state.db, "category", &slug).await? else {
+    let Some(term) = term::get_public_by_slug(&state.db, "category", &slug).await? else {
         return not_found_page(&state, session.as_ref(), &format!("/categories/{slug}")).await;
     };
 
@@ -262,7 +262,7 @@ pub async fn tag(
     )
     .await?;
     let site = ctx.site.clone();
-    let Some(term) = term::get_by_slug(&state.db, "tag", &slug).await? else {
+    let Some(term) = term::get_public_by_slug(&state.db, "tag", &slug).await? else {
         return not_found_page(&state, session.as_ref(), &format!("/tags/{slug}")).await;
     };
 
@@ -792,14 +792,14 @@ pub async fn sitemap(State(state): State<AppState>) -> AppResult<Response> {
         ));
     }
 
-    for term in term::list(&state.db, "category").await? {
+    for term in term::list_public(&state.db, "category").await? {
         urls.push(format!(
             "<url><loc>{}/categories/{}</loc></url>",
             xml_escape(&site.site_url),
             xml_escape(&term.term.slug)
         ));
     }
-    for term in term::list(&state.db, "tag").await? {
+    for term in term::list_public(&state.db, "tag").await? {
         urls.push(format!(
             "<url><loc>{}/tags/{}</loc></url>",
             xml_escape(&site.site_url),
@@ -824,8 +824,24 @@ pub async fn robots(State(state): State<AppState>) -> AppResult<Response> {
     Ok(([(CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response())
 }
 
-pub async fn media(State(state): State<AppState>, Path(path): Path<String>) -> AppResult<Response> {
+pub async fn media(
+    State(state): State<AppState>,
+    OptionalUser(session): OptionalUser,
+    Path(path): Path<String>,
+) -> AppResult<Response> {
     let key = path.trim_start_matches('/');
+    let publicly_referenced = media::is_publicly_referenced(&state.db, key).await?;
+    let can_view_private = session
+        .as_ref()
+        .is_some_and(|session| matches!(session.user.role.as_str(), "admin" | "editor"));
+    if !publicly_referenced && !can_view_private {
+        return Ok((
+            StatusCode::NOT_FOUND,
+            [(CACHE_CONTROL, "private, no-store")],
+        )
+            .into_response());
+    }
+
     let bytes = state
         .storage
         .get(key)
@@ -834,9 +850,14 @@ pub async fn media(State(state): State<AppState>, Path(path): Path<String>) -> A
     let mime = mime_guess::from_path(key)
         .first_or_octet_stream()
         .to_string();
+    let cache_control = if publicly_referenced {
+        "public, max-age=3600"
+    } else {
+        "private, no-store"
+    };
     Response::builder()
         .header(CONTENT_TYPE, mime)
-        .header(CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .header(CACHE_CONTROL, cache_control)
         .body(Body::from(bytes))
         .map_err(|error| AppError::internal(error.to_string()))
 }

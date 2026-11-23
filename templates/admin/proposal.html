@@ -26,6 +26,7 @@
     <div class="proposal-actions proposal-actions-large">
       <form method="post" action="/admin/{{ kind_path }}/{{ item.content.id }}/proposals/{{ proposal.id }}/apply">
         <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+        <input type="hidden" name="version" value="{{ proposal.version }}">
         <label class="checkbox"><input type="checkbox" name="force" value="1"> 强制应用（忽略文章后续改动）</label>
         <button class="button" type="submit">应用这个版本</button>
       </form>

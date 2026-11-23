@@ -53,6 +53,21 @@ pub async fn get(pool: &SqlitePool, id: i64) -> AppResult<Option<Media>> {
     .await?)
 }
 
+pub async fn is_publicly_referenced(pool: &SqlitePool, storage_key: &str) -> AppResult<bool> {
+    let url_path = format!("/media/{storage_key}");
+    let referenced: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM contents c \
+             WHERE c.kind IN ('post', 'page') AND c.status = 'published' \
+               AND c.visibility = 'public' AND c.deleted_at IS NULL \
+               AND instr(c.body, ?) > 0 \
+         )",
+    )
+    .bind(url_path)
+    .fetch_one(pool)
+    .await?;
+    Ok(referenced != 0)
+}
+
 pub async fn delete(pool: &SqlitePool, id: i64) -> AppResult<()> {
     sqlx::query("DELETE FROM media WHERE id = ?")
         .bind(id)

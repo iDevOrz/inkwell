@@ -6,7 +6,7 @@
   <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
   <script src="/static/mermaid-init.js?v=8" defer></script>
   <script src="/static/vditor/dist/index.min.js?v=1" defer></script>
-  <script src="/static/vditor-editor.js?v=4" defer></script>
+  <script src="/static/vditor-editor.js?v=5" defer></script>
 {% endblock %}
 {% block heading %}{% if is_new %}新建{{ kind_label }}{% else %}编辑{{ kind_label }}{% endif %}{% endblock %}
 {% block top_actions %}
@@ -17,16 +17,59 @@
 {% endblock %}
 
 {% block content %}
+<div class="editor-page">
+  <div class="editor-intro">
+    <div>
+      <a class="editor-back-link" href="/admin/{{ kind_path }}">← 返回{{ kind_label }}列表</a>
+      <p class="editor-kicker">THE WRITING DESK <span>/</span> {{ kind_label }}</p>
+      <p class="editor-description">给想法一点空间，慢慢写成值得留下的东西。</p>
+    </div>
+    <div class="editor-document-state">
+      <span class="editor-state-dot" aria-hidden="true"></span>
+      {% for status in statuses %}
+        {% if status.selected %}<span>{{ status.label }}</span>{% endif %}
+      {% endfor %}
+      <span class="editor-state-separator" aria-hidden="true">·</span>
+      <span>{% if is_new %}新建内容{% else %}编辑中{% endif %}</span>
+    </div>
+  </div>
+
 <div class="editor">
-  <form class="editor-main panel" method="post"
+  <form class="editor-main panel editor-document" method="post"
         action="{% if let Some(id) = content_id %}/admin/{{ kind_path }}/{{ id }}{% else %}/admin/{{ kind_path }}{% endif %}">
     <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+    {% if let Some(expected_updated_at) = form.expected_updated_at %}
+      <input type="hidden" name="expected_updated_at" value="{{ expected_updated_at }}">
+    {% endif %}
 
-    <label class="field">标题
+    <label class="field editor-title-field">
+      <span class="editor-field-kicker">TITLE</span>
       <input class="title-input" type="text" name="title" value="{{ form.title }}" required autofocus>
+      <span class="editor-title-hint">一个清晰、具体的标题，给读者一个开始。</span>
     </label>
 
-    <div class="form-row">
+    <div class="editor-section-heading">
+      <span class="editor-section-number">01</span>
+      <div>
+        <strong>正文</strong>
+        <span>在这里整理你的思路</span>
+      </div>
+    </div>
+
+    <div class="field editor-body-field">
+      <div id="vditor" class="vditor-host"></div>
+      <textarea id="body-input" name="body" hidden>{{ form.body }}</textarea>
+    </div>
+
+    <div class="editor-section-heading editor-details-heading">
+      <span class="editor-section-number">02</span>
+      <div>
+        <strong>整理与发布</strong>
+        <span>让内容更容易被发现和继续打磨</span>
+      </div>
+    </div>
+
+    <div class="form-row editor-meta-row">
       <label class="field">缩略名
         <input type="text" name="slug" value="{{ form.slug }}" placeholder="留空自动生成">
       </label>
@@ -38,11 +81,6 @@
           {% endfor %}
         </select>
       </label>
-    </div>
-
-    <div class="field">正文（Markdown）
-      <div id="vditor" class="vditor-host"></div>
-      <textarea id="body-input" name="body" hidden>{{ form.body }}</textarea>
     </div>
 
     <label class="field">摘要
@@ -93,21 +131,25 @@
     </label>
 
     <div class="editor-actions">
-      <button class="button" type="submit" name="action" value="save">保存</button>
+      <span class="editor-action-note">提交后会记录在修订历史中</span>
+      <div class="editor-action-buttons">
+      <button class="button button-ghost" type="submit" name="action" value="save">保存更改</button>
       {% if kind != "note" %}
-        <button class="button button-primary" type="submit" name="action" value="publish">发布</button>
+        <button class="button button-primary" type="submit" name="action" value="publish">发布文章 <span aria-hidden="true">↗</span></button>
       {% endif %}
       {% if let Some(id) = content_id %}
         <a class="button button-ghost" href="/admin/{{ kind_path }}/{{ id }}/annotate">划词批注</a>
       {% endif %}
       <button class="button button-ghost" type="submit" name="action" value="submit_review">提交 Review</button>
+      </div>
     </div>
   </form>
 
   <aside class="editor-side">
     {% if let Some(item) = item %}
       <section class="panel side-panel">
-        <h3>信息</h3>
+        <p class="editor-side-kicker">DOCUMENT</p>
+        <h3>内容信息</h3>
         <dl class="meta-list">
           <dt>作者</dt><dd>{{ item.author_name }}</dd>
           <dt>创建</dt><dd>{{ item.created_label }}</dd>
@@ -213,5 +255,6 @@
       {% endif %}
     {% endif %}
   </aside>
+</div>
 </div>
 {% endblock %}

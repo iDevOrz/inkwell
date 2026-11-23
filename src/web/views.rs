@@ -197,6 +197,7 @@ pub fn error_for(code: Option<&str>) -> Option<String> {
         "upload" => "上传失败",
         "too_large" => "文件超过大小限制",
         "forbidden" => "没有权限",
+        "proposal_changed" => "提案或文章在预览后发生了变化，已载入最新差异，请重新核对。",
         _ => return None,
     };
     Some(message.to_string())

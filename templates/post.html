@@ -15,113 +15,174 @@
 {% endblock %}
 
 {% block content %}
-<article class="post">
-  <header class="post-header">
-    <p class="eyebrow">ARTICLE</p>
-    <h1>{{ post.content.title }}</h1>
-    <div class="post-meta">
-      <time>{{ post.published_label }}</time>
-      <span class="dot">·</span>
-      <span>{{ post.author_name }}</span>
-      <span class="dot">·</span>
-      <span>{{ post.reading_minutes }} 分钟阅读</span>
-      {% if let Some(category) = post.categories.first() %}
-        <span class="dot">·</span>
-        <a href="/categories/{{ category.slug }}">{{ category.name }}</a>
-      {% endif %}
-    </div>
-    {% if !post.tags.is_empty() %}
-      <div class="tag-list">
-        {% for tag in post.tags %}
-          <a class="tag" href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
-        {% endfor %}
-      </div>
-    {% endif %}
-    {% if post.content.visibility == "private" %}
-      <div class="flash flash-error">这是一篇私密内容，仅登录用户可见。</div>
-    {% endif %}
-  </header>
+<div class="reading-page">
+  <nav class="reading-breadcrumb" aria-label="面包屑导航">
+    <a href="/">Inkwell</a>
+    <span aria-hidden="true">/</span>
+    <span>文章</span>
+  </nav>
 
-  <div class="prose">
-    {{ post.html|safe }}
-  </div>
+  <div class="reading-layout">
+    <div class="reading-main">
+      <article class="post reading-post">
+        <header class="post-header reading-header">
+          <div class="reading-overline">
+            <span class="reading-overline-mark">INKWELL JOURNAL</span>
+            <span class="reading-overline-rule" aria-hidden="true"></span>
+            <span>ARTICLE</span>
+          </div>
+          <h1>{{ post.content.title }}</h1>
+          {% if post.content.excerpt.is_some() %}
+            <p class="reading-deck">{{ post.content.excerpt.as_deref().unwrap_or_default() }}</p>
+          {% endif %}
 
-  <footer class="post-footer">
-    <div class="post-nav">
-      {% if let Some(prev) = prev %}
-        <a class="post-nav-link" href="/archives/{{ prev.slug }}">
-          <span class="post-nav-label">上一篇</span>
-          <span>{{ prev.title }}</span>
-        </a>
-      {% endif %}
-      {% if let Some(next) = next %}
-        <a class="post-nav-link post-nav-next" href="/archives/{{ next.slug }}">
-          <span class="post-nav-label">下一篇</span>
-          <span>{{ next.title }}</span>
-        </a>
-      {% endif %}
-    </div>
-  </footer>
-</article>
+          <div class="post-meta reading-meta">
+            <span>{{ post.author_name }}</span>
+            <span class="reading-meta-separator" aria-hidden="true">/</span>
+            <time>{{ post.published_label }}</time>
+            <span class="reading-meta-separator" aria-hidden="true">/</span>
+            <span>{{ post.reading_minutes }} 分钟阅读</span>
+          </div>
 
-<section class="comments" id="comments">
-  <div class="section-heading">
-    <h2>评论</h2>
-    <span class="count">{{ comment_count }}</span>
-  </div>
+          {% if !post.categories.is_empty() || !post.tags.is_empty() %}
+            <div class="reading-taxonomy">
+              {% for category in post.categories %}
+                <a class="reading-category" href="/categories/{{ category.slug }}">{{ category.name }}</a>
+              {% endfor %}
+              {% for tag in post.tags %}
+                <a class="tag reading-tag" href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
+              {% endfor %}
+            </div>
+          {% endif %}
 
-  {% if comments.is_empty() %}
-    <p class="muted">还没有评论，来说两句吧。</p>
-  {% else %}
-    <div class="comment-list">
-      {% for item in comments %}
-        <div class="comment depth-{{ item.depth }}" id="comment-{{ item.comment.id }}">
-          <div class="comment-head">
-            <strong>{{ item.comment.author }}</strong>
-            <time>{{ item.created_label }}</time>
-            {% if let Some(url) = item.comment.url %}
-              <a class="comment-site" href="{{ url }}" rel="nofollow ugc noopener" target="_blank">网站</a>
+          {% if post.content.visibility == "private" %}
+            <div class="flash flash-error">这是一篇私密内容，仅登录用户可见。</div>
+          {% endif %}
+        </header>
+
+        <div class="prose reading-prose">
+          {{ post.html|safe }}
+        </div>
+
+        <footer class="post-footer reading-post-footer">
+          <div class="post-nav">
+            {% if let Some(prev) = prev %}
+              <a class="post-nav-link" href="/archives/{{ prev.slug }}">
+                <span class="post-nav-label">上一篇</span>
+                <span>{{ prev.title }}</span>
+              </a>
+            {% endif %}
+            {% if let Some(next) = next %}
+              <a class="post-nav-link post-nav-next" href="/archives/{{ next.slug }}">
+                <span class="post-nav-label">下一篇</span>
+                <span>{{ next.title }}</span>
+              </a>
             {% endif %}
           </div>
-          <div class="comment-body">{{ item.comment.body }}</div>
-          {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
-            <a class="reply-link" href="/archives/{{ post.content.slug }}?reply={{ item.comment.id }}#comment-form">回复</a>
-          {% endif %}
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
+        </footer>
+      </article>
 
-  {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
-    <form class="comment-form" id="comment-form" method="post" action="/comments/{{ post.content.id }}">
-      {% if let Some(reply) = reply_to %}
-        <p class="replying">回复 <strong>{{ reply.comment.author }}</strong>，<a href="/archives/{{ post.content.slug }}#comment-form">取消</a></p>
+      <section class="comments reading-comments" id="comments">
+        <div class="section-heading reading-section-heading">
+          <div>
+            <p class="reading-section-kicker">THE CONVERSATION</p>
+            <h2>留下一点回声</h2>
+          </div>
+          <span class="count">{{ comment_count }} 条评论</span>
+        </div>
+
+        {% if comments.is_empty() %}
+          <p class="muted reading-empty-comments">还没有评论。欢迎开始这场对话。</p>
+        {% else %}
+          <div class="comment-list">
+            {% for item in comments %}
+              <div class="comment depth-{{ item.depth }}" id="comment-{{ item.comment.id }}">
+                <div class="comment-head">
+                  <strong>{{ item.comment.author }}</strong>
+                  <time>{{ item.created_label }}</time>
+                  {% if let Some(url) = item.comment.url %}
+                    <a class="comment-site" href="{{ url }}" rel="nofollow ugc noopener" target="_blank">网站</a>
+                  {% endif %}
+                </div>
+                <div class="comment-body">{{ item.comment.body }}</div>
+                {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
+                  <a class="reply-link" href="/archives/{{ post.content.slug }}?reply={{ item.comment.id }}#comment-form">回复</a>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {% if ctx.site.comments_enabled && post.content.allow_comments != 0 %}
+          <form class="comment-form reading-comment-form" id="comment-form" method="post" action="/comments/{{ post.content.id }}">
+            {% if let Some(reply) = reply_to %}
+              <p class="replying">回复 <strong>{{ reply.comment.author }}</strong>，<a href="/archives/{{ post.content.slug }}#comment-form">取消</a></p>
+            {% endif %}
+            <input type="hidden" name="parent_id" value="{{ comment_form.parent_id }}">
+            <div class="honeypot" aria-hidden="true">
+              <label>网站 <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+            </div>
+            <div class="form-row">
+              <label>昵称
+                <input type="text" name="author" required value="{{ comment_form.author }}" autocomplete="nickname">
+              </label>
+              <label>邮箱
+                <input type="email" name="email" value="{{ comment_form.email }}" autocomplete="email">
+              </label>
+              <label>网站
+                <input type="url" name="url" value="{{ comment_form.url }}" autocomplete="url">
+              </label>
+            </div>
+            <label>评论
+              <textarea name="body" rows="5" required>{{ comment_form.body }}</textarea>
+            </label>
+            <div class="form-actions">
+              <button class="button" type="submit">提交评论</button>
+              <span class="muted">提交后可能需要审核。</span>
+            </div>
+          </form>
+        {% else %}
+          <p class="muted">评论已关闭。</p>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="reading-rail" aria-label="文章信息">
+      <section class="reading-rail-card">
+        <p class="reading-rail-kicker">IN THIS ENTRY</p>
+        <dl class="reading-facts">
+          <div>
+            <dt>阅读时间</dt>
+            <dd>{{ post.reading_minutes }} 分钟</dd>
+          </div>
+          <div>
+            <dt>发布于</dt>
+            <dd>{{ post.published_label }}</dd>
+          </div>
+          <div>
+            <dt>作者</dt>
+            <dd>{{ post.author_name }}</dd>
+          </div>
+        </dl>
+        {% if let Some(category) = post.categories.first() %}
+          <a class="reading-rail-link" href="/categories/{{ category.slug }}">浏览「{{ category.name }}」<span aria-hidden="true">↗</span></a>
+        {% endif %}
+        <a class="reading-rail-link" href="#comments">前往评论区 <span aria-hidden="true">↓</span></a>
+      </section>
+
+      {% if !post.tags.is_empty() %}
+        <section class="reading-rail-tags">
+          <p class="reading-rail-kicker">RELATED TERMS</p>
+          <div class="reading-rail-tag-list">
+            {% for tag in post.tags %}
+              <a href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
+            {% endfor %}
+          </div>
+        </section>
       {% endif %}
-      <input type="hidden" name="parent_id" value="{{ comment_form.parent_id }}">
-      <div class="honeypot" aria-hidden="true">
-        <label>网站 <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
-      </div>
-      <div class="form-row">
-        <label>昵称
-          <input type="text" name="author" required value="{{ comment_form.author }}" autocomplete="nickname">
-        </label>
-        <label>邮箱
-          <input type="email" name="email" value="{{ comment_form.email }}" autocomplete="email">
-        </label>
-        <label>网站
-          <input type="url" name="url" value="{{ comment_form.url }}" autocomplete="url">
-        </label>
-      </div>
-      <label>评论
-        <textarea name="body" rows="5" required>{{ comment_form.body }}</textarea>
-      </label>
-      <div class="form-actions">
-        <button class="button" type="submit">提交评论</button>
-        <span class="muted">提交后可能需要审核。</span>
-      </div>
-    </form>
-  {% else %}
-    <p class="muted">评论已关闭。</p>
-  {% endif %}
-</section>
+
+      <p class="reading-rail-note">Write, note,<br>and think with AI.</p>
+    </aside>
+  </div>
+</div>
 {% endblock %}

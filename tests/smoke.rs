@@ -1,113 +1,17 @@
-use std::net::SocketAddr;
-use std::path::Path;
+mod common;
 
-use axum::Router;
+use std::net::SocketAddr;
+
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
-use axum::http::{Method, Request, Response, StatusCode, header};
-use http_body_util::BodyExt;
-use inkwell::{app, config::Config};
+use axum::http::{Method, Request, StatusCode, header};
+use common::{
+    body_string, cookie_from, encode, hidden_value, mcp_call, mcp_tool, mcp_tool_with_token,
+    test_config,
+};
+use inkwell::app;
 use serde_json::{Value, json};
 use tower::ServiceExt;
-
-fn test_config(data_dir: &Path) -> Config {
-    Config {
-        bind_addr: "127.0.0.1:0".parse().expect("addr"),
-        database_url: "sqlite::memory:".to_string(),
-        data_dir: data_dir.to_path_buf(),
-        site_url: "http://test.local".to_string(),
-        admin_user: "admin".to_string(),
-        admin_password: Some("testpass123".to_string()),
-        mcp_token: Some("testtoken".to_string()),
-        mcp_token_scopes: vec![
-            "read".to_string(),
-            "write".to_string(),
-            "review".to_string(),
-        ],
-        secure_cookies: false,
-        trust_proxy_headers: false,
-        session_days: 14,
-        max_upload_bytes: 1024 * 1024,
-    }
-}
-
-async fn body_string(response: Response<Body>) -> String {
-    let bytes = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body")
-        .to_bytes();
-    String::from_utf8_lossy(&bytes).to_string()
-}
-
-fn cookie_from(headers: &header::HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find_map(|value| {
-            let first = value.split(';').next()?;
-            let (key, value) = first.split_once('=')?;
-            (key == name).then(|| value.to_string())
-        })
-}
-
-fn hidden_value(html: &str, name: &str) -> String {
-    let needle = format!("name=\"{name}\" value=\"");
-    let start = html.find(&needle).expect("hidden input") + needle.len();
-    let end = html[start..].find('"').expect("hidden input end") + start;
-    html[start..end].to_string()
-}
-
-fn encode(values: &[(&str, &str)]) -> String {
-    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-    for (key, value) in values {
-        serializer.append_pair(key, value);
-    }
-    serializer.finish()
-}
-
-async fn mcp_call(router: &Router, payload: Value) -> Value {
-    mcp_call_with_token(router, payload, "testtoken").await
-}
-
-async fn mcp_call_with_token(router: &Router, payload: Value, token: &str) -> Value {
-    let response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/mcp")
-                .header(header::AUTHORIZATION, format!("Bearer {token}"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(payload.to_string()))
-                .expect("request"),
-        )
-        .await
-        .expect("mcp response");
-    assert_eq!(response.status(), 200);
-    serde_json::from_str(&body_string(response).await).expect("mcp json")
-}
-
-async fn mcp_tool(router: &Router, name: &str, arguments: Value) -> Value {
-    mcp_tool_with_token(router, name, arguments, "testtoken").await
-}
-
-async fn mcp_tool_with_token(router: &Router, name: &str, arguments: Value, token: &str) -> Value {
-    let response = mcp_call_with_token(
-        router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": { "name": name, "arguments": arguments }
-        }),
-        token,
-    )
-    .await;
-    response["result"].clone()
-}
 
 #[tokio::test]
 async fn blog_login_notes_and_mcp_smoke() {

@@ -76,7 +76,7 @@ fn print_help() {
          Environment:\n\
            BIND_ADDR        default 127.0.0.1:3000\n\
            DATA_DIR         default ./data\n\
-           DATABASE_URL     default sqlite://<DATA_DIR>/typecho.db\n\
+           DATABASE_URL     default sqlite://<DATA_DIR>/inkwell.db (existing typecho.db is kept)\n\
            SITE_URL         public site URL, default http://127.0.0.1:3000\n\
            ADMIN_USER       default admin\n\
            ADMIN_PASSWORD   initial password; generated if omitted\n\

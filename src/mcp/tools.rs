@@ -825,21 +825,31 @@ async fn review_queue(
     review_queue_value(state, limit).await
 }
 
+/// Scheme for MCP resource URIs.
+pub const RESOURCE_SCHEME: &str = "inkwell://";
+/// Pre-rename scheme, still accepted for reads (see the naming ADR).
+const LEGACY_RESOURCE_SCHEME: &str = "typecho://";
+
 pub async fn resource_value(state: &AppState, uri: &str) -> AppResult<Value> {
     let principal = McpPrincipal::local();
-    if uri == "typecho://review/queue" {
-        review_queue_value(state, 50).await
-    } else if uri == "typecho://annotations/queue" {
-        annotation_queue(state, &principal, &json!({"status": "open", "limit": 50})).await
-    } else if uri == "typecho://notes/recent" {
-        note_list(state, &principal, &json!({"limit": 20})).await
-    } else if let Some(id) = uri.strip_prefix("typecho://content/") {
-        let id = id
-            .parse::<i64>()
-            .map_err(|_| AppError::bad_request("无效的内容 URI"))?;
-        content_get(state, &principal, &json!({"id": id})).await
-    } else {
-        Err(AppError::not_found("未知资源"))
+    let path = uri
+        .strip_prefix(RESOURCE_SCHEME)
+        .or_else(|| uri.strip_prefix(LEGACY_RESOURCE_SCHEME))
+        .ok_or_else(|| AppError::not_found("未知资源"))?;
+    match path {
+        "review/queue" => review_queue_value(state, 50).await,
+        "annotations/queue" => {
+            annotation_queue(state, &principal, &json!({"status": "open", "limit": 50})).await
+        }
+        "notes/recent" => note_list(state, &principal, &json!({"limit": 20})).await,
+        _ => {
+            let id = path
+                .strip_prefix("content/")
+                .ok_or_else(|| AppError::not_found("未知资源"))?
+                .parse::<i64>()
+                .map_err(|_| AppError::bad_request("无效的内容 URI"))?;
+            content_get(state, &principal, &json!({"id": id})).await
+        }
     }
 }
 

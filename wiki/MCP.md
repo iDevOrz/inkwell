@@ -47,7 +47,7 @@ Token 可通过 `MCP_TOKEN` 设置，也可在后台 `/admin/tokens` 创建独�
 - AI 版本：`proposal_create`, `proposal_list`, `proposal_get`, `proposal_update`, `proposal_apply`, `proposal_reject`（`proposal_create` 建议带 `expected_updated_at`，原文已变化时返回冲突）
 - 评论：`comment_list`, `comment_moderate`
 
-资源包括 `typecho://review/queue`、`typecho://annotations/queue` 和 `typecho://notes/recent`（`resources/list`），以及资源模板 `typecho://content/{id}`（`resources/templates/list`）。
+资源包括 `inkwell://review/queue`、`inkwell://annotations/queue` 和 `inkwell://notes/recent`（`resources/list`），以及资源模板 `inkwell://content/{id}`（`resources/templates/list`）。旧的 `typecho://` 前缀仍可读取，但不再列出。
 
 批量 JSON-RPC 请求最多 50 条；空数组或结构错误的请求返回 `-32600`。
 

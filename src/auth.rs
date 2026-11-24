@@ -17,8 +17,11 @@ use crate::models::User;
 use crate::state::AppState;
 use crate::util::{constant_time_eq, now_ts, random_token, sha256_hex};
 
-pub const SESSION_COOKIE: &str = "typecho_session";
-pub const LOGIN_CSRF_COOKIE: &str = "typecho_login_csrf";
+pub const SESSION_COOKIE: &str = "inkwell_session";
+pub const LOGIN_CSRF_COOKIE: &str = "inkwell_login_csrf";
+/// Name used before the rename; still accepted so existing sessions survive
+/// an upgrade (see wiki/adr/0001-rename-legacy-typecho-identifiers.md).
+pub const LEGACY_SESSION_COOKIE: &str = "typecho_session";
 
 #[derive(Debug, Clone)]
 pub struct AuthSession {
@@ -66,7 +69,7 @@ impl FromRequestParts<AppState> for OptionalUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let Some(token) = cookie_value(&parts.headers, SESSION_COOKIE) else {
+        let Some(token) = session_token(&parts.headers) else {
             return Ok(Self(None));
         };
 
@@ -289,6 +292,21 @@ pub fn session_cookie(token: &str, max_age_seconds: i64, secure: bool) -> Header
 
 pub fn clear_session_cookie(secure: bool) -> HeaderValue {
     session_cookie("", 0, secure)
+}
+
+/// Expires the pre-rename session cookie; sent on login and logout so a
+/// browser ends up holding only the current name.
+pub fn clear_legacy_session_cookie(secure: bool) -> HeaderValue {
+    let secure = if secure { "; Secure" } else { "" };
+    HeaderValue::from_str(&format!(
+        "{LEGACY_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}"
+    ))
+    .expect("legacy session cookie is valid")
+}
+
+/// The session token from the current cookie, falling back to the legacy name.
+pub fn session_token(headers: &HeaderMap) -> Option<String> {
+    cookie_value(headers, SESSION_COOKIE).or_else(|| cookie_value(headers, LEGACY_SESSION_COOKIE))
 }
 
 pub fn login_csrf_cookie(token: &str, secure: bool) -> HeaderValue {

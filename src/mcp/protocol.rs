@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use crate::repo::token::McpPrincipal;
 use crate::state::AppState;
 
-use super::tools;
+use super::tools::{self, RESOURCE_SCHEME};
 
 pub const DEFAULT_PROTOCOL_VERSION: &str = "2024-11-05";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
@@ -104,19 +104,19 @@ async fn handle_request(state: &AppState, principal: &McpPrincipal, value: Value
             Some(json!({
                 "resources": [
                     {
-                        "uri": "typecho://review/queue",
+                        "uri": format!("{RESOURCE_SCHEME}review/queue"),
                         "name": "Review queue",
                         "description": "Content waiting for review and comments waiting for moderation",
                         "mimeType": "application/json"
                     },
                     {
-                        "uri": "typecho://notes/recent",
+                        "uri": format!("{RESOURCE_SCHEME}notes/recent"),
                         "name": "Recent notes",
                         "description": "The most recently updated private notes",
                         "mimeType": "application/json"
                     },
                     {
-                        "uri": "typecho://annotations/queue",
+                        "uri": format!("{RESOURCE_SCHEME}annotations/queue"),
                         "name": "Open annotations",
                         "description": "Inline and general annotations waiting for AI edits",
                         "mimeType": "application/json"
@@ -128,7 +128,7 @@ async fn handle_request(state: &AppState, principal: &McpPrincipal, value: Value
             Some(json!({
                 "resourceTemplates": [
                     {
-                        "uriTemplate": "typecho://content/{id}",
+                        "uriTemplate": format!("{RESOURCE_SCHEME}content/{{id}}"),
                         "name": "Content by id",
                         "description": "One post, page or note with body, metadata and revisions",
                         "mimeType": "application/json"

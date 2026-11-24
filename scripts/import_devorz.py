@@ -550,12 +550,26 @@ def verify_created_draft(
     return row == (title, slug, body, "draft", "public")
 
 
+DATABASE_FILE = "inkwell.db"
+# Default name before the rename; existing installs keep it (see the naming ADR).
+LEGACY_DATABASE_FILE = "typecho.db"
+
+
+def default_db_path(data_dir: str) -> str:
+    """Mirror the server's default: prefer inkwell.db, fall back to typecho.db."""
+    current = Path(data_dir) / DATABASE_FILE
+    legacy = Path(data_dir) / LEGACY_DATABASE_FILE
+    if not current.exists() and legacy.exists():
+        return str(legacy)
+    return str(current)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", default="https://www.devorz.com/")
     parser.add_argument("--mcp-url", default="http://127.0.0.1:3000/mcp")
     parser.add_argument("--token", default=os.environ.get("MCP_TOKEN", ""))
-    parser.add_argument("--db", default="data/typecho.db")
+    parser.add_argument("--db", default=default_db_path("data"))
     parser.add_argument("--uploads", default="data/uploads")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")

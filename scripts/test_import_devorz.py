@@ -59,7 +59,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_dry_run_database_connection_is_read_only(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
 
@@ -70,7 +70,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_rejects_a_different_mcp_instance_before_writes(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
@@ -102,7 +102,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_rejects_a_cloned_database_and_cleans_probe(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
@@ -137,7 +137,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_verifies_the_exact_shared_database_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
@@ -179,7 +179,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_main_stops_before_discovery_when_target_mismatches(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             uploads_dir = Path(directory) / "uploads"
             with open_db(db_path) as setup:
                 setup.executescript(
@@ -226,7 +226,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_dry_run_main_performs_no_database_or_upload_writes(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             uploads_dir = Path(directory) / "uploads"
             with open_db(db_path) as setup:
                 setup.executescript(
@@ -435,7 +435,7 @@ class ExistingArticleTests(unittest.TestCase):
 
     def test_main_skips_existing_slug_without_fetching(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             with open_db(db_path) as setup:
                 setup.executescript(
                     "CREATE TABLE users(id INTEGER PRIMARY KEY);"
@@ -469,3 +469,13 @@ class ExistingArticleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultDatabaseTests(unittest.TestCase):
+    def test_prefers_current_name_and_keeps_legacy_installs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("inkwell.db"))
+            (Path(directory) / "typecho.db").touch()
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("typecho.db"))
+            (Path(directory) / "inkwell.db").touch()
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("inkwell.db"))

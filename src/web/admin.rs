@@ -12,8 +12,9 @@ use serde_json::json;
 
 use crate::auth::{
     AdminSession, AuthSession, LOGIN_CSRF_COOKIE, OptionalUser, check_login_password,
-    clear_login_csrf_cookie, clear_session_cookie, cookie_value, create_session, delete_session,
-    hash_password_async, login_csrf_cookie, session_cookie, verify_csrf,
+    clear_legacy_session_cookie, clear_login_csrf_cookie, clear_session_cookie, cookie_value,
+    create_session, delete_session, hash_password_async, login_csrf_cookie, session_cookie,
+    verify_csrf,
 };
 use crate::error::{AppError, AppResult};
 use crate::markdown;
@@ -382,6 +383,10 @@ async fn login_submit(
         SET_COOKIE,
         clear_login_csrf_cookie(state.config.secure_cookies),
     );
+    response.headers_mut().append(
+        SET_COOKIE,
+        clear_legacy_session_cookie(state.config.secure_cookies),
+    );
     Ok(response)
 }
 
@@ -419,6 +424,10 @@ async fn logout(
     response.headers_mut().append(
         SET_COOKIE,
         clear_session_cookie(state.config.secure_cookies),
+    );
+    response.headers_mut().append(
+        SET_COOKIE,
+        clear_legacy_session_cookie(state.config.secure_cookies),
     );
     Ok(response)
 }

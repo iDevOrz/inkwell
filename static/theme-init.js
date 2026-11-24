@@ -1,10 +1,24 @@
 (() => {
-  const STORAGE_KEY = "typecho-theme";
+  const STORAGE_KEY = "inkwell-theme";
+  // Pre-rename key; migrated once on first read (see the naming ADR).
+  const LEGACY_STORAGE_KEY = "typecho-theme";
   const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+  /** @returns {string | null} */
+  function readStoredValue() {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current !== null) return current;
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy !== null) {
+      localStorage.setItem(STORAGE_KEY, legacy);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
+    return legacy;
+  }
 
   function readMode() {
     try {
-      const value = localStorage.getItem(STORAGE_KEY);
+      const value = readStoredValue();
       if (value === "light" || value === "dark" || value === "system") {
         return value;
       }
@@ -58,7 +72,7 @@
     }
   });
 
-  window.TypechoTheme = {
+  window.InkwellTheme = {
     get: readMode,
     set: setMode,
     resolve: resolveMode,

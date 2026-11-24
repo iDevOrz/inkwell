@@ -10,6 +10,7 @@ use common::{
     test_config,
 };
 use inkwell::app;
+use inkwell::auth::{LOGIN_CSRF_COOKIE, SESSION_COOKIE};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -109,7 +110,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .expect("login page");
     assert_eq!(login.status(), 200);
     let login_csrf_cookie =
-        cookie_from(login.headers(), "typecho_login_csrf").expect("login csrf cookie");
+        cookie_from(login.headers(), LOGIN_CSRF_COOKIE).expect("login csrf cookie");
     let login_html = body_string(login).await;
     let login_csrf = hidden_value(&login_html, "csrf");
 
@@ -128,7 +129,7 @@ async fn blog_login_notes_and_mcp_smoke() {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(
                     header::COOKIE,
-                    format!("typecho_login_csrf={login_csrf_cookie}"),
+                    format!("{LOGIN_CSRF_COOKIE}={login_csrf_cookie}"),
                 )
                 .body(Body::from(form))
                 .expect("request"),
@@ -136,14 +137,14 @@ async fn blog_login_notes_and_mcp_smoke() {
         .await
         .expect("login submit");
     assert_eq!(login_submit.status(), 303);
-    let session = cookie_from(login_submit.headers(), "typecho_session").expect("session cookie");
+    let session = cookie_from(login_submit.headers(), SESSION_COOKIE).expect("session cookie");
 
     let admin = router
         .clone()
         .oneshot(
             Request::builder()
                 .uri("/admin")
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -179,7 +180,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri("/admin/media")
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("media page"),
         )
@@ -192,7 +193,7 @@ async fn blog_login_notes_and_mcp_smoke() {
             Request::builder()
                 .method(Method::POST)
                 .uri(format!("/admin/media/{undeletable_media_id}/delete"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(encode(&[("_csrf", &media_csrf)])))
                 .expect("media delete request"),
@@ -275,7 +276,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/media/{storage_key}"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("authenticated private media request"),
         )
@@ -491,7 +492,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/admin/notes/{note_id}/edit"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -693,7 +694,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/admin/posts/{post_id}/annotate"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -718,7 +719,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/admin/posts/{post_id}/revisions/{revision_id}"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -759,7 +760,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/admin/posts/{post_id}/proposals/{proposal_id}"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -812,7 +813,7 @@ async fn blog_login_notes_and_mcp_smoke() {
                     "/admin/posts/{post_id}/proposals/{proposal_id}/apply"
                 ))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::from(encode(&[
                     ("_csrf", &hidden_value(&proposal_diff_html, "_csrf")),
                     ("version", &reviewed_version.to_string()),
@@ -836,7 +837,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(&expected_location)
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("latest proposal diff request"),
         )
@@ -943,7 +944,7 @@ async fn blog_login_notes_and_mcp_smoke() {
         .oneshot(
             Request::builder()
                 .uri(format!("/admin/posts/{concurrent_id}/edit"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .body(Body::empty())
                 .expect("concurrent edit page"),
         )
@@ -987,7 +988,7 @@ async fn blog_login_notes_and_mcp_smoke() {
             Request::builder()
                 .method(Method::POST)
                 .uri(format!("/admin/posts/{concurrent_id}"))
-                .header(header::COOKIE, format!("typecho_session={session}"))
+                .header(header::COOKIE, format!("{SESSION_COOKIE}={session}"))
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(stale_form))
                 .expect("stale admin save"),
@@ -1124,7 +1125,7 @@ async fn mcp_protocol_and_scope_edges() {
     .await;
     assert_eq!(
         templates["result"]["resourceTemplates"][0]["uriTemplate"],
-        "typecho://content/{id}"
+        "inkwell://content/{id}"
     );
 
     // Resolving annotations is the author's call: write-only tokens cannot.

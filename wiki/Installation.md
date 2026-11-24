@@ -53,7 +53,7 @@ TRUST_PROXY_HEADERS=true
 |---|---|---|
 | `BIND_ADDR` | `127.0.0.1:3000` | 监听地址；Docker 镜像内为 `0.0.0.0:3000` |
 | `DATA_DIR` | `./data` | SQLite 数据库和上传文件目录 |
-| `DATABASE_URL` | `sqlite://<DATA_DIR>/typecho.db` | 数据库连接串 |
+| `DATABASE_URL` | `sqlite://<DATA_DIR>/inkwell.db` | 数据库连接串；旧版本留下的 `typecho.db` 会继续被使用 |
 | `SITE_URL` | `http://127.0.0.1:3000` | 对外站点地址 |
 | `ADMIN_USER` | `admin` | 首次启动创建的用户名 |
 | `ADMIN_PASSWORD` | 随机生成 | 首次启动的管理员密码 |
@@ -72,5 +72,5 @@ TRUST_PROXY_HEADERS=true
 停止服务后，可备份整个 `data/` 目录。也可以使用 SQLite 在线备份：
 
 ```bash
-sqlite3 data/typecho.db ".backup 'data/backup.db'"
+sqlite3 data/inkwell.db ".backup 'data/backup.db'"
 ```

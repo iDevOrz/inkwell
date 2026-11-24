@@ -30,12 +30,8 @@ impl Config {
         let data_dir = env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string());
         let data_dir = PathBuf::from(data_dir);
 
-        let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-            format!(
-                "sqlite://{}/typecho.db",
-                data_dir.to_string_lossy().trim_end_matches('/')
-            )
-        });
+        let database_url =
+            env::var("DATABASE_URL").unwrap_or_else(|_| default_database_url(&data_dir));
 
         let bind_addr = env::var("BIND_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:3000".to_string())
@@ -128,6 +124,29 @@ fn parse_session_days(value: Option<&str>) -> Result<i64> {
     }
 }
 
+const DATABASE_FILE: &str = "inkwell.db";
+/// Default file name before the rename. Existing installs keep using it; it
+/// is never renamed automatically because WAL/SHM files travel with it.
+const LEGACY_DATABASE_FILE: &str = "typecho.db";
+
+fn default_database_url(data_dir: &std::path::Path) -> String {
+    let current = data_dir.join(DATABASE_FILE);
+    let legacy = data_dir.join(LEGACY_DATABASE_FILE);
+    let file = if !current.exists() && legacy.exists() {
+        tracing::warn!(
+            path = %legacy.display(),
+            "using legacy database file name; stop the server and rename it (with any -wal/-shm files) to {DATABASE_FILE}"
+        );
+        LEGACY_DATABASE_FILE
+    } else {
+        DATABASE_FILE
+    };
+    format!(
+        "sqlite://{}/{file}",
+        data_dir.to_string_lossy().trim_end_matches('/')
+    )
+}
+
 fn parse_bool(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -138,6 +157,23 @@ fn parse_bool(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_database_prefers_the_current_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = |dir: &std::path::Path| default_database_url(dir);
+
+        assert!(url(dir.path()).ends_with("/inkwell.db"));
+
+        std::fs::write(dir.path().join("typecho.db"), b"").unwrap();
+        assert!(
+            url(dir.path()).ends_with("/typecho.db"),
+            "existing installs keep their legacy file"
+        );
+
+        std::fs::write(dir.path().join("inkwell.db"), b"").unwrap();
+        assert!(url(dir.path()).ends_with("/inkwell.db"));
+    }
 
     #[test]
     fn unknown_mcp_scope_is_rejected() {

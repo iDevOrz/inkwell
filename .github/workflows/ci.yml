@@ -126,12 +126,12 @@ jobs:
           wait_healthy
           # The in-image probe is what Docker's HEALTHCHECK runs.
           docker exec "$container" inkwell healthcheck
-          docker exec "$container" test -s /app/data/typecho.db
+          docker exec "$container" test -s /app/data/inkwell.db
 
           docker restart "$container"
           wait_healthy
           docker exec "$container" inkwell healthcheck
-          docker exec "$container" test -s /app/data/typecho.db
+          docker exec "$container" test -s /app/data/inkwell.db
 
   coverage:
     name: Test coverage

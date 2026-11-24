@@ -155,8 +155,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
 
 async fn security_headers(request: Request<Body>, next: Next) -> Response {
     let path = request.uri().path();
-    let has_session =
-        crate::auth::cookie_value(request.headers(), crate::auth::SESSION_COOKIE).is_some();
+    let has_session = crate::auth::session_token(request.headers()).is_some();
     let public_asset = path.starts_with("/static/") || path.starts_with("/media/");
     let private_response =
         !public_asset && (path.starts_with("/admin") || path == "/mcp" || has_session);

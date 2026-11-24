@@ -357,6 +357,24 @@ async fn token_verify_rejects_unknown_and_revoked_tokens() {
     assert!(row.revoked_at.is_some());
 }
 
+#[tokio::test]
+async fn token_revoke_reports_missing_ids_and_is_idempotent() {
+    let app = TestApp::new().await;
+    let pool = &app.pool;
+    let (id, _) = token::create(pool, "temp", &scopes(&["read"]))
+        .await
+        .expect("create");
+
+    token::revoke(pool, id).await.expect("revoke");
+    token::revoke(pool, id)
+        .await
+        .expect("revoking twice is a no-op");
+    assert!(matches!(
+        token::revoke(pool, 999_999).await,
+        Err(AppError::NotFound(_))
+    ));
+}
+
 #[test]
 fn admin_scope_implies_every_other_scope() {
     let admin = token::McpPrincipal {

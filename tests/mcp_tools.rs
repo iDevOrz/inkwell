@@ -213,6 +213,30 @@ async fn mutating_tools_refuse_a_read_only_token() {
 }
 
 #[tokio::test]
+async fn scope_is_checked_before_looking_up_ids() {
+    // A read-only token must not learn whether an id exists: every mutating
+    // tool reports the missing scope even for ids that are not in the database.
+    let app = TestApp::new().await;
+    let missing = Fixture {
+        post: 999_999,
+        note: 999_998,
+        annotation: 999_997,
+        proposal: 999_996,
+        revision: 999_995,
+        comment: 999_994,
+    };
+    let reader = app.token_with(&["read"]).await;
+    for (name, arguments) in mutating_calls(&missing) {
+        let result = app.tool_as(&reader, name, arguments).await;
+        assert!(
+            tool_text(&result).contains(MISSING_SCOPE),
+            "{name} revealed lookup result before checking scope: {}",
+            tool_text(&result)
+        );
+    }
+}
+
+#[tokio::test]
 async fn tokens_without_read_scope_cannot_read() {
     let app = TestApp::new().await;
     let f = fixture(&app).await;

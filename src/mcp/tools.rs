@@ -1143,6 +1143,9 @@ async fn proposal_apply(
     principal: &McpPrincipal,
     args: &Value,
 ) -> AppResult<Value> {
+    // Check the base scope before any lookup so a token without it cannot
+    // probe which proposal ids exist.
+    require(principal, "write")?;
     let id = required_i64(args, "id")?;
     let version =
         arg_i64(args, "version").ok_or_else(|| AppError::bad_request("version 必须是整数"))?;
@@ -1154,8 +1157,6 @@ async fn proposal_apply(
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
     if current.status == "published" {
         require(principal, "publish")?;
-    } else {
-        require(principal, "write")?;
     }
     let force = arg_bool(args, "force").unwrap_or(false);
     let (proposal, content) = proposal::apply(

@@ -232,6 +232,46 @@ impl TestApp {
             .await
     }
 
+    /// POST a multipart form. Each part is (field name, optional file name, bytes).
+    pub async fn post_multipart(
+        &self,
+        uri: &str,
+        session: Option<&Session>,
+        extra_headers: &[(&str, &str)],
+        parts: &[(&str, Option<&str>, &[u8])],
+    ) -> Response<Body> {
+        const BOUNDARY: &str = "inkwell-test-boundary";
+        let mut body = Vec::new();
+        for (name, file_name, bytes) in parts {
+            body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
+            let disposition = match file_name {
+                Some(file) => format!(
+                    "Content-Disposition: form-data; name=\"{name}\"; filename=\"{file}\"\r\n\
+                     Content-Type: application/octet-stream\r\n"
+                ),
+                None => format!("Content-Disposition: form-data; name=\"{name}\"\r\n"),
+            };
+            body.extend_from_slice(disposition.as_bytes());
+            body.extend_from_slice(b"\r\n");
+            body.extend_from_slice(bytes);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+
+        let mut request = Request::builder().method(Method::POST).uri(uri).header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        );
+        if let Some(session) = session {
+            request = request.header(header::COOKIE, &session.cookie);
+        }
+        for (name, value) in extra_headers {
+            request = request.header(*name, *value);
+        }
+        self.send(request.body(Body::from(body)).expect("request"))
+            .await
+    }
+
     pub async fn send(&self, request: Request<Body>) -> Response<Body> {
         self.router
             .clone()

@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Fail the build if line coverage drops below this percentage.
-      COVERAGE_MIN_LINES: 75
+      COVERAGE_MIN_LINES: 85
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

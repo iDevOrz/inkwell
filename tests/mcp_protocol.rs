@@ -126,3 +126,186 @@ async fn mcp_protocol_and_scope_edges() {
         );
     }
 }
+
+// ------------------------------------------------------------- HTTP transport
+
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode, header};
+
+async fn raw_post(app: &TestApp, authorization: Option<&str>, body: &str) -> (StatusCode, String) {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/mcp")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(value) = authorization {
+        request = request.header(header::AUTHORIZATION, value);
+    }
+    let response = app
+        .send(request.body(Body::from(body.to_string())).expect("request"))
+        .await;
+    let status = response.status();
+    (status, common::body_string(response).await)
+}
+
+const PING: &str = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+
+#[tokio::test]
+async fn http_requires_a_valid_unrevoked_bearer_token() {
+    let app = TestApp::new().await;
+
+    let missing = app
+        .send(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/mcp")
+                .body(Body::from(PING))
+                .expect("request"),
+        )
+        .await;
+    assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        missing.headers()[header::WWW_AUTHENTICATE],
+        "Bearer realm=\"inkwell\""
+    );
+
+    for authorization in ["Bearer ", "Basic dGVzdA==", "Bearer not-a-token"] {
+        let (status, _) = raw_post(&app, Some(authorization), PING).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{authorization}");
+    }
+
+    let (id, token) = inkwell::repo::token::create(&app.pool, "client", &["read".to_string()])
+        .await
+        .expect("token");
+    let (status, _) = raw_post(&app, Some(&format!("Bearer {token}")), PING).await;
+    assert_eq!(status, StatusCode::OK);
+    inkwell::repo::token::revoke(&app.pool, id)
+        .await
+        .expect("revoke");
+    let (status, _) = raw_post(&app, Some(&format!("Bearer {token}")), PING).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn http_reports_parse_errors_notifications_and_wrong_methods() {
+    let app = TestApp::new().await;
+    let auth = Some("Bearer testtoken");
+
+    let (status, body) = raw_post(&app, auth, "{not json").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("-32700"));
+
+    let (status, body) = raw_post(
+        &app,
+        auth,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(body.is_empty());
+
+    let get = app.get("/mcp", None).await;
+    assert_eq!(get.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(get.headers()[header::ALLOW], "POST");
+}
+
+#[tokio::test]
+async fn protocol_errors_use_json_rpc_codes() {
+    let app = TestApp::new().await;
+    let call = |payload: Value| {
+        let router = app.router.clone();
+        async move { mcp_call(&router, payload).await }
+    };
+
+    let unknown = call(json!({"jsonrpc": "2.0", "id": 1, "method": "nope"})).await;
+    assert_eq!(unknown["error"]["code"], -32601);
+
+    let no_name =
+        call(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {}})).await;
+    assert_eq!(no_name["error"]["code"], -32602);
+
+    let no_uri =
+        call(json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {}})).await;
+    assert_eq!(no_uri["error"]["code"], -32602);
+
+    let bad_uri = call(json!({
+        "jsonrpc": "2.0", "id": 4, "method": "resources/read",
+        "params": {"uri": "inkwell://content/not-a-number"}
+    }))
+    .await;
+    assert_eq!(bad_uri["error"]["code"], -32602);
+
+    for method in ["ping", "tools/list"] {
+        let ok = call(json!({"jsonrpc": "2.0", "id": 5, "method": method})).await;
+        assert!(ok.get("result").is_some(), "{method}: {ok}");
+    }
+
+    let init = call(json!({
+        "jsonrpc": "2.0", "id": 6, "method": "initialize",
+        "params": {"protocolVersion": "1999-01-01"}
+    }))
+    .await;
+    assert_eq!(
+        init["result"]["protocolVersion"],
+        inkwell::mcp::protocol::DEFAULT_PROTOCOL_VERSION,
+        "unknown versions fall back to the default"
+    );
+}
+
+#[tokio::test]
+async fn read_scope_is_required_for_resources() {
+    let app = TestApp::new().await;
+    let reviewer = app.token_with(&["review"]).await;
+    for method in ["resources/list", "resources/templates/list"] {
+        let response = common::mcp_call_with_token(
+            &app.router,
+            json!({"jsonrpc": "2.0", "id": 1, "method": method}),
+            &reviewer,
+        )
+        .await;
+        assert_eq!(response["error"]["code"], -32001, "{method}");
+    }
+}
+
+// ------------------------------------------------------------ stdio transport
+
+#[tokio::test]
+async fn stdio_answers_each_line_and_skips_notifications() {
+    let app = TestApp::new().await;
+    // A second in-memory instance; stdio callers use the state directly.
+    let state = inkwell::app::build_state(common::test_config(app.data_dir()))
+        .await
+        .expect("state");
+    let input = [
+        PING,
+        "",
+        "{broken",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"content_publish","arguments":{"id":1}}}"#,
+    ]
+    .join("\n");
+    let mut output = Vec::new();
+
+    inkwell::mcp::serve_lines(&state, input.as_bytes(), &mut output)
+        .await
+        .expect("serve");
+
+    let responses: Vec<Value> = String::from_utf8(output)
+        .expect("utf8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("json line"))
+        .collect();
+    assert_eq!(
+        responses.len(),
+        3,
+        "ping, parse error, tool call; no reply to notifications"
+    );
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[1]["error"]["code"], -32700);
+    // stdio is local and fully trusted, so even publishing is allowed.
+    assert_eq!(
+        responses[2]["result"]["isError"],
+        Value::Null,
+        "{}",
+        responses[2]
+    );
+}

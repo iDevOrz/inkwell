@@ -62,7 +62,7 @@ TRUST_PROXY_HEADERS=true
 | `COOKIE_SECURE` | 根据 `SITE_URL` 自动判断 | 强制 Secure Cookie |
 | `TRUST_PROXY_HEADERS` | `false` | 是否信任反向代理 IP 头 |
 | `SESSION_DAYS` | `14` | 登录有效期（天），取值 1–365 |
-| `MAX_UPLOAD_BYTES` | `10485760` | 单个上传文件的大小上限 |
+| `MAX_UPLOAD_BYTES` | `10485760` | 单个上传文件的大小上限；不是整数时启动失败 |
 | `RUST_LOG` | `inkwell=info,tower_http=info` | 日志级别 |
 
 站点标题、简介、时区、评论设置和每页数量在 `/admin/settings` 管理。

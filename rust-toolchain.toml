@@ -1,0 +1,6 @@
+# Pinned so a new stable release (and its new clippy lints) cannot break CI
+# unannounced. Bump deliberately; Cargo.toml `rust-version` is the minimum.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

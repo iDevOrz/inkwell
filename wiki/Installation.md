@@ -27,6 +27,8 @@ docker compose up -d --build
 ```
 
 Compose 配置要求提供 `ADMIN_PASSWORD`，不会使用固定的管理员密码。数据保存在本地 `data/`，该目录已加入 `.gitignore`。Unix 系统启动时会将数据目录和媒体根目录权限收紧为仅服务账号可访问（`0700`）。
+镜像内置健康检查：`inkwell healthcheck` 请求 `/healthz`（数据库可用时返回 200，否则 503），Docker 和 Compose 据此标记容器健康状态。也可以把反向代理或监控指向 `GET /healthz`。
+
 Docker Compose 默认只将服务端口绑定到 `127.0.0.1`，建议通过 HTTPS 反向代理对外提供服务。
 
 Linux bind mount 使用容器 UID 10001。如果目录权限不允许写入，可调整宿主机目录所有者，或使用 Docker named volume。不要为了绕过权限问题将 `data/` 改成全局可读写；应让目录归容器服务 UID 所有。

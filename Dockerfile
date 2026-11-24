@@ -34,4 +34,8 @@ ENV DATA_DIR=/app/data \
 VOLUME ["/app/data"]
 EXPOSE 3000
 
+# Probes GET /healthz (database reachable) without needing curl in the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+    CMD ["inkwell", "healthcheck"]
+
 CMD ["inkwell", "serve"]

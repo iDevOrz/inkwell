@@ -115,13 +115,25 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ApiToken>> {
     .await?)
 }
 
+/// Revokes a token. Revoking an already revoked token is a no-op; an unknown
+/// id is reported as not found.
 pub async fn revoke(pool: &SqlitePool, id: i64) -> AppResult<()> {
-    sqlx::query("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
-        .bind(now_ts())
+    let result =
+        sqlx::query("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+            .bind(now_ts())
+            .bind(id)
+            .execute(pool)
+            .await?;
+    if result.rows_affected() > 0 {
+        return Ok(());
+    }
+    let exists: Option<i64> = sqlx::query_scalar("SELECT id FROM api_tokens WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .fetch_optional(pool)
         .await?;
-    Ok(())
+    exists
+        .map(|_| ())
+        .ok_or_else(|| AppError::not_found("Token 不存在"))
 }
 
 pub fn scopes_from_env(value: &str) -> Vec<String> {

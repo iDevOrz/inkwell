@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd, html};
@@ -12,18 +13,38 @@ pub struct WikiTarget {
     pub href: Option<String>,
 }
 
-pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String {
-    let body = body.replace("<!--more-->", "");
-    let expanded = expand_wiki_links(&body, wiki);
-
+fn parser_options() -> Options {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    options
+}
 
-    let parser = Parser::new_ext(&expanded, options);
+fn fence_language(info: &str) -> Option<String> {
+    info.split_whitespace()
+        .next()
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+const MAX_HEADING_ID_CHARS: usize = 100;
+
+fn is_safe_heading_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().count() <= MAX_HEADING_ID_CHARS
+        && id
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
+}
+
+pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String {
+    let body = body.replace("<!--more-->", "");
+    let expanded = expand_wiki_links(&body, wiki);
+
+    let parser = Parser::new_ext(&expanded, parser_options());
     let mut events = Vec::new();
     let mut in_code = false;
     let mut code = String::new();
@@ -35,11 +56,7 @@ pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String
                 in_code = true;
                 code.clear();
                 language = match kind {
-                    CodeBlockKind::Fenced(info) => info
-                        .split_whitespace()
-                        .next()
-                        .map(|value| value.to_ascii_lowercase())
-                        .filter(|value| !value.is_empty()),
+                    CodeBlockKind::Fenced(info) => fence_language(&info),
                     CodeBlockKind::Indented => None,
                 };
             }
@@ -93,6 +110,16 @@ pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String
                     id,
                 }));
             }
+            Event::Start(Tag::Heading { level, id, .. }) => {
+                // `{#id .class key=value}` is allowed for anchors only: classes and
+                // arbitrary attributes (style=, data-*) could restyle the page.
+                events.push(Event::Start(Tag::Heading {
+                    level,
+                    id: id.filter(|value| is_safe_heading_id(value)),
+                    classes: Vec::new(),
+                    attrs: Vec::new(),
+                }));
+            }
             Event::Html(raw) | Event::InlineHtml(raw) => {
                 // Never pass author-supplied raw HTML through. Turning it into text
                 // makes pulldown-cmark escape it for us.
@@ -141,10 +168,15 @@ pub fn excerpt(body: &str, max_chars: usize) -> String {
     }
 }
 
+/// Uses the same parser and language rule as `render_markdown`, so a page
+/// loads the Mermaid script exactly when a diagram is rendered.
 pub fn contains_mermaid(body: &str) -> bool {
-    body.lines().any(|line| {
-        let line = line.trim_start();
-        line.starts_with("```mermaid") || line.starts_with("~~~mermaid")
+    Parser::new_ext(body, parser_options()).any(|event| {
+        matches!(
+            event,
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
+                if fence_language(&info).as_deref() == Some("mermaid")
+        )
     })
 }
 
@@ -157,118 +189,90 @@ pub fn reading_minutes(body: &str) -> i64 {
 }
 
 pub fn wiki_titles(body: &str) -> Vec<String> {
-    let mut titles = Vec::new();
-    let mut fenced = false;
-
-    for line in body.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
-        }
-
-        let mut inline_code = false;
-        let characters: Vec<char> = line.chars().collect();
-        let mut index = 0;
-        while index < characters.len() {
-            let character = characters[index];
-            if character == '`' {
-                inline_code = !inline_code;
-                index += 1;
-                continue;
-            }
-            if !inline_code
-                && character == '['
-                && characters.get(index + 1) == Some(&'[')
-                && index + 2 < characters.len()
-                && let Some(end) = characters[index + 2..]
-                    .windows(2)
-                    .position(|window| window == [']', ']'])
-            {
-                let end = index + 2 + end;
-                let title: String = characters[index + 2..end].iter().collect();
-                let title = title.trim();
-                if !title.is_empty() && !titles.iter().any(|existing| existing == title) {
-                    titles.push(title.to_string());
-                }
-                index = end + 2;
-                continue;
-            }
-            index += 1;
+    let mut titles: Vec<String> = Vec::new();
+    for link in wiki_link_spans(body) {
+        if !titles.iter().any(|existing| existing == link.title) {
+            titles.push(link.title.to_string());
         }
     }
-
     titles
 }
 
 fn expand_wiki_links(body: &str, wiki: &HashMap<String, WikiTarget>) -> String {
-    let mut output = String::new();
-    let mut fenced = false;
-
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
-            output.push_str(line);
-            continue;
-        }
-        if fenced {
-            output.push_str(line);
-            continue;
-        }
-
-        let characters: Vec<char> = line.chars().collect();
-        let mut inline_code = false;
-        let mut index = 0;
-        let mut cursor = 0;
-
-        while index < characters.len() {
-            let character = characters[index];
-            if character == '`' {
-                inline_code = !inline_code;
-                index += 1;
-                continue;
+    let mut output = String::with_capacity(body.len());
+    let mut cursor = 0;
+    for link in wiki_link_spans(body) {
+        output.push_str(&body[cursor..link.start]);
+        let target = wiki
+            .get(link.title)
+            .or_else(|| wiki.get(&link.title.to_lowercase()));
+        match target {
+            Some(WikiTarget {
+                label,
+                href: Some(href),
+            }) => {
+                let label = label.replace('[', "\\[").replace(']', "\\]");
+                let href = href.replace(')', "%29");
+                output.push_str(&format!("[{label}]({href})"));
             }
-            if !inline_code
-                && character == '['
-                && characters.get(index + 1) == Some(&'[')
-                && index + 2 < characters.len()
-                && let Some(end_offset) = characters[index + 2..]
-                    .windows(2)
-                    .position(|window| window == [']', ']'])
-            {
-                let end = index + 2 + end_offset;
-                let title: String = characters[index + 2..end].iter().collect();
-                let title = title.trim();
-
-                output.extend(characters[cursor..index].iter());
-                if let Some(target) = wiki.get(title).or_else(|| wiki.get(&title.to_lowercase())) {
-                    match &target.href {
-                        Some(href) => {
-                            let label = target.label.replace('[', "\\[").replace(']', "\\]");
-                            let href = href.replace(')', "%29");
-                            output.push_str(&format!("[{label}]({href})"));
-                        }
-                        None => output.push_str(&target.label),
-                    }
-                } else {
-                    output.push_str(&format!("[[{title}]]"));
-                }
-
-                cursor = end + 2;
-                index = cursor;
-                continue;
-            }
-            index += 1;
+            Some(WikiTarget { label, href: None }) => output.push_str(label),
+            None => output.push_str(&format!("[[{}]]", link.title)),
         }
-
-        output.extend(characters[cursor..].iter());
+        cursor = link.end;
     }
-
+    output.push_str(&body[cursor..]);
     output
+}
+
+struct WikiLinkSpan<'a> {
+    start: usize,
+    end: usize,
+    title: &'a str,
+}
+
+/// Finds `[[title]]` links outside code. Code ranges come from the Markdown
+/// parser itself, so nested/mixed fences, indented blocks and inline code
+/// follow CommonMark exactly.
+fn wiki_link_spans(body: &str) -> Vec<WikiLinkSpan<'_>> {
+    let code_ranges = code_ranges(body);
+    let in_code = |position: usize| code_ranges.iter().any(|range| range.contains(&position));
+
+    let mut spans = Vec::new();
+    let mut search_from = 0;
+    while let Some(offset) = body[search_from..].find("[[") {
+        let start = search_from + offset;
+        let title_start = start + 2;
+        let Some(close) = body[title_start..].find("]]") else {
+            break;
+        };
+        let title_end = title_start + close;
+        let raw_title = &body[title_start..title_end];
+        if in_code(start) || raw_title.contains('\n') {
+            search_from = title_start;
+            continue;
+        }
+        let title = raw_title.trim();
+        if !title.is_empty() {
+            spans.push(WikiLinkSpan {
+                start,
+                end: title_end + 2,
+                title,
+            });
+        }
+        search_from = title_end + 2;
+    }
+    spans
+}
+
+fn code_ranges(body: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    for (event, range) in Parser::new_ext(body, parser_options()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) | Event::Code(_) => ranges.push(range),
+            _ => {}
+        }
+    }
+    ranges
 }
 
 fn is_safe_url(value: &str) -> bool {
@@ -356,6 +360,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn heading_attributes_cannot_inject_styles_or_classes() {
+        let html = render_markdown(
+            "# Login {#intro .overlay style=position:fixed onclick=x}",
+            &HashMap::new(),
+        );
+        assert!(html.contains("id=\"intro\""));
+        assert!(!html.contains("style"));
+        assert!(!html.contains("overlay"));
+        assert!(!html.contains("onclick"));
+    }
+
+    #[test]
+    fn heading_ids_with_unsafe_characters_are_dropped() {
+        let html = render_markdown("# Title {#bad\"id}", &HashMap::new());
+        assert!(!html.contains("id="));
+    }
+
+    #[test]
     fn raw_html_is_escaped() {
         let html = render_markdown("<script>alert(1)</script>", &HashMap::new());
         assert!(!html.contains("<script>"));
@@ -404,6 +426,46 @@ mod tests {
     fn unsafe_links_are_neutralized() {
         let html = render_markdown("[click](javascript:alert(1))", &HashMap::new());
         assert!(!html.contains("javascript:"));
+    }
+
+    #[test]
+    fn mermaid_detection_matches_rendering() {
+        for body in ["``` mermaid\nA-->B\n```", "```Mermaid\nA-->B\n```"] {
+            assert!(render_markdown(body, &HashMap::new()).contains(r#"class="mermaid""#));
+            assert!(contains_mermaid(body), "{body}");
+        }
+        assert!(!contains_mermaid("````\n```mermaid\nA\n```\n````"));
+    }
+
+    #[test]
+    fn wiki_titles_respect_nested_and_mixed_fences() {
+        // A ``` line inside a ```` fence, or ~~~ inside ```, does not close it.
+        let body = "````\n```\n[[InCode1]]\n````\n[[Real1]]\n```\n~~~\n[[InCode2]]\n```\n[[Real2]]";
+        assert_eq!(
+            wiki_titles(body),
+            vec!["Real1".to_string(), "Real2".to_string()]
+        );
+    }
+
+    #[test]
+    fn wiki_titles_skip_indented_code() {
+        let titles = wiki_titles("para\n\n    [[InCode]]\n\n[[Real]]");
+        assert_eq!(titles, vec!["Real".to_string()]);
+    }
+
+    #[test]
+    fn wiki_expansion_skips_nested_fences() {
+        let mut wiki = HashMap::new();
+        wiki.insert(
+            "X".to_string(),
+            WikiTarget {
+                label: "X".to_string(),
+                href: Some("/x".to_string()),
+            },
+        );
+        let html = render_markdown("````\n```\n[[X]]\n````\n\n[[X]]", &wiki);
+        assert_eq!(html.matches(r#"<a href="/x">"#).count(), 1, "{html}");
+        assert!(html.contains("[[X]]"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ MCP_TOKEN=<token> \
   --site https://example.com/ \
   --mcp-url http://127.0.0.1:3000/mcp \
   --token <token> \
-  --db data/typecho.db
+  --db data/inkwell.db
 ```
 
 请在可信环境运行，并避免将 token 放进 shell 历史、日志或提交到 Git。

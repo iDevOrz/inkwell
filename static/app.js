@@ -7,6 +7,8 @@
     }
   };
 
+  const SESSION_EXPIRED_MESSAGE = "登录已过期，请刷新页面后重新登录";
+
   onReady(() => {
     const bodyInput = document.querySelector("#body-input");
     const previewButton = document.querySelector("#preview-button");
@@ -34,8 +36,17 @@
           body: JSON.stringify({ body: bodyInput.value }),
           signal: previewController.signal,
         });
+        if (response.redirected || response.status === 401 || response.status === 403) {
+          // An expired session redirects to /admin/login; never inject that page.
+          if (previewStatus) previewStatus.textContent = SESSION_EXPIRED_MESSAGE;
+          return;
+        }
         if (!response.ok) {
           throw new Error((await response.text()) || `HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.startsWith("text/html")) {
+          throw new Error(`Unexpected content type: ${contentType || "none"}`);
         }
         previewContent.innerHTML = await response.text();
         if (previewStatus) previewStatus.textContent = "已更新";
@@ -44,7 +55,7 @@
         }
       } catch (error) {
         if (error.name === "AbortError") return;
-        if (previewStatus) previewStatus.textContent = "预览失败";
+        if (previewStatus) previewStatus.textContent = "预览失败，请稍后重试";
         console.warn("Preview failed", error);
       }
     }

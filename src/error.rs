@@ -59,13 +59,22 @@ impl AppError {
         }
     }
 
+    /// Message safe to show to users and MCP clients. Internal errors are
+    /// logged here and replaced with a generic message so SQL text and file
+    /// paths never leak; other variants return their text without the
+    /// English log prefix used by `Display`.
     pub fn message(&self) -> String {
         match self {
             Self::Internal(error) => {
                 tracing::error!(error = ?error, "internal error");
                 "服务器内部错误，请稍后再试。".to_string()
             }
-            other => other.to_string(),
+            Self::NotFound(message)
+            | Self::BadRequest(message)
+            | Self::Unauthorized(message)
+            | Self::Forbidden(message)
+            | Self::Conflict(message)
+            | Self::Redirect(message) => message.clone(),
         }
     }
 }
@@ -160,3 +169,19 @@ a{{color:#2f6f5e}}
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_message_hides_details() {
+        let error = AppError::Internal(anyhow::anyhow!("write upload /app/data/uploads/x.png"));
+        assert!(!error.message().contains("/app/data"));
+    }
+
+    #[test]
+    fn user_error_message_has_no_log_prefix() {
+        assert_eq!(AppError::conflict("内容冲突").message(), "内容冲突");
+    }
+}

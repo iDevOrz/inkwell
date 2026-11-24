@@ -6,10 +6,15 @@ use crate::repo::content;
 use crate::util::now_ts;
 use sqlx::{FromRow, Transaction};
 
+const STALE_BASE_MESSAGE: &str = "原文在读取后已被修改，请重新读取原文后再生成版本";
+
 #[derive(Debug, Clone)]
 pub struct ProposalInput {
     pub content_id: i64,
     pub base_revision_id: Option<i64>,
+    /// `updated_at` the caller saw when it read the content. When set, the
+    /// proposal is rejected if the content has changed since.
+    pub expected_updated_at: Option<i64>,
     pub title: Option<String>,
     pub body: String,
     pub excerpt: Option<String>,
@@ -32,6 +37,11 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
     if current.status == "trash" || current.deleted_at.is_some() {
         return Err(AppError::bad_request("回收站内容不能生成版本"));
     }
+    if let Some(expected) = input.expected_updated_at
+        && current.updated_at != expected
+    {
+        return Err(AppError::conflict(STALE_BASE_MESSAGE));
+    }
 
     let title = input
         .title
@@ -45,6 +55,15 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
         return Err(AppError::bad_request("版本正文不能为空"));
     }
 
+    // Every content write records a revision, so the latest revision is the
+    // live text. A caller-supplied base must be that revision; anything older
+    // means the content changed after the AI read it.
+    let latest_revision_id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM revisions WHERE content_id = ? ORDER BY id DESC LIMIT 1",
+    )
+    .bind(input.content_id)
+    .fetch_optional(pool)
+    .await?;
     let base_revision_id = match input.base_revision_id {
         Some(id) => {
             let revision_content: Option<i64> =
@@ -55,20 +74,16 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
             if revision_content != Some(input.content_id) {
                 return Err(AppError::bad_request("基础修订不属于这篇文章"));
             }
+            if Some(id) != latest_revision_id {
+                return Err(AppError::conflict(STALE_BASE_MESSAGE));
+            }
             Some(id)
         }
-        None => {
-            sqlx::query_scalar(
-                "SELECT id FROM revisions WHERE content_id = ? ORDER BY id DESC LIMIT 1",
-            )
-            .bind(input.content_id)
-            .fetch_optional(pool)
-            .await?
-        }
+        None => latest_revision_id,
     };
 
     let now = now_ts();
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let result = sqlx::query(
         "INSERT INTO content_proposals(content_id, base_revision_id, base_updated_at, title, \
                 body, excerpt, summary, status, author, created_at) \
@@ -167,7 +182,7 @@ pub async fn update(
     excerpt: Option<String>,
     summary: Option<String>,
 ) -> AppResult<ContentProposal> {
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let current = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;
@@ -251,7 +266,7 @@ pub async fn apply(
     force: bool,
     can_publish: bool,
 ) -> AppResult<(ContentProposal, Content)> {
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let proposal = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;

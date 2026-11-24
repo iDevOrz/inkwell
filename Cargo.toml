@@ -2,6 +2,8 @@
 name = "inkwell"
 version = "0.1.0"
 edition = "2024"
+# Minimum supported Rust: sqlx 0.9 requires 1.94. Checked by the `msrv` CI job.
+rust-version = "1.94"
 description = "A small, self-hosted blog and notes system with MCP support"
 license = "MIT"
 

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use argon2::Argon2;
@@ -10,20 +10,44 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use sqlx::{FromRow, SqlitePool};
+use tokio::sync::Semaphore;
 
 use crate::error::{AppError, AppResult};
 use crate::models::User;
 use crate::state::AppState;
 use crate::util::{constant_time_eq, now_ts, random_token, sha256_hex};
 
-pub const SESSION_COOKIE: &str = "typecho_session";
-pub const LOGIN_CSRF_COOKIE: &str = "typecho_login_csrf";
+pub const SESSION_COOKIE: &str = "inkwell_session";
+pub const LOGIN_CSRF_COOKIE: &str = "inkwell_login_csrf";
+/// Name used before the rename; still accepted so existing sessions survive
+/// an upgrade (see wiki/adr/0001-rename-legacy-typecho-identifiers.md).
+pub const LEGACY_SESSION_COOKIE: &str = "typecho_session";
 
 #[derive(Debug, Clone)]
 pub struct AuthSession {
     pub user: User,
     pub csrf_token: String,
     pub token_hash: String,
+}
+
+impl AuthSession {
+    /// Admins and editors may use the back office and see drafts/private content.
+    pub fn can_manage_content(&self) -> bool {
+        matches!(self.user.role.as_str(), "admin" | "editor")
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.user.role == "admin"
+    }
+
+    /// Site settings and MCP tokens grant control over the whole instance.
+    pub fn require_admin(&self) -> AppResult<()> {
+        if self.is_admin() {
+            Ok(())
+        } else {
+            Err(AppError::forbidden("只有管理员可以执行此操作"))
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -45,7 +69,7 @@ impl FromRequestParts<AppState> for OptionalUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let Some(token) = cookie_value(&parts.headers, SESSION_COOKIE) else {
+        let Some(token) = session_token(&parts.headers) else {
             return Ok(Self(None));
         };
 
@@ -72,7 +96,7 @@ impl FromRequestParts<AppState> for AdminSession {
             return Err(AppError::Redirect(format!("/admin/login?next={next}")));
         };
 
-        if session.user.role != "admin" && session.user.role != "editor" {
+        if !session.can_manage_content() {
             return Err(AppError::Forbidden("当前账号没有后台权限".to_string()));
         }
 
@@ -93,6 +117,53 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
         .is_ok()
+}
+
+/// Each Argon2 run costs ~19 MiB and tens of milliseconds; bound how many run
+/// at once so a burst of logins cannot exhaust memory or the blocking pool.
+const MAX_CONCURRENT_PASSWORD_CHECKS: usize = 4;
+static PASSWORD_CHECK_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_PASSWORD_CHECKS);
+
+/// Verified against when the username does not exist, so unknown and known
+/// usernames both cost one Argon2 run and cannot be told apart by timing.
+static DUMMY_PASSWORD_HASH: LazyLock<String> =
+    LazyLock::new(|| hash_password(&random_token(32)).expect("hash dummy login password"));
+
+/// Runs CPU-heavy password work on the blocking pool, never on async workers.
+async fn run_password_work<T, F>(work: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let _permit = PASSWORD_CHECK_SLOTS
+        .acquire()
+        .await
+        .map_err(|error| anyhow::anyhow!("password check semaphore closed: {error}"))?;
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| anyhow::anyhow!("password check task failed: {error}").into())
+}
+
+/// Checks a login password. Pass `None` when the user does not exist: a dummy
+/// hash is still verified so the response time does not reveal usernames.
+pub async fn check_login_password(password: String, hash: Option<String>) -> bool {
+    let has_user = hash.is_some();
+    let result = run_password_work(move || {
+        let hash = hash.as_deref().unwrap_or(DUMMY_PASSWORD_HASH.as_str());
+        verify_password(&password, hash)
+    })
+    .await;
+    match result {
+        Ok(matches) => has_user && matches,
+        Err(error) => {
+            tracing::error!(%error, "password verification failed");
+            false
+        }
+    }
+}
+
+pub async fn hash_password_async(password: String) -> AppResult<String> {
+    run_password_work(move || hash_password(&password)).await?
 }
 
 pub async fn create_session(
@@ -223,6 +294,21 @@ pub fn clear_session_cookie(secure: bool) -> HeaderValue {
     session_cookie("", 0, secure)
 }
 
+/// Expires the pre-rename session cookie; sent on login and logout so a
+/// browser ends up holding only the current name.
+pub fn clear_legacy_session_cookie(secure: bool) -> HeaderValue {
+    let secure = if secure { "; Secure" } else { "" };
+    HeaderValue::from_str(&format!(
+        "{LEGACY_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}"
+    ))
+    .expect("legacy session cookie is valid")
+}
+
+/// The session token from the current cookie, falling back to the legacy name.
+pub fn session_token(headers: &HeaderMap) -> Option<String> {
+    cookie_value(headers, SESSION_COOKIE).or_else(|| cookie_value(headers, LEGACY_SESSION_COOKIE))
+}
+
 pub fn login_csrf_cookie(token: &str, secure: bool) -> HeaderValue {
     let secure = if secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
@@ -247,12 +333,16 @@ pub fn append_cookie(headers: &mut HeaderMap, value: HeaderValue) {
 struct Attempt {
     failures: u32,
     blocked_until: Option<Instant>,
-    last_seen: Instant,
+    /// Attempts are counted per fixed window, so occasional legitimate use
+    /// (a reader leaving a comment now and then) never accumulates into a block.
+    window_start: Instant,
 }
 
 const LOGIN_ATTEMPT_TTL: Duration = Duration::from_secs(20 * 60);
 const LOGIN_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_LOGIN_KEYS: usize = 4_096;
+const MAX_LOGIN_ATTEMPTS: u32 = 5;
+const LOGIN_BLOCK_DURATION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
 struct LoginLimiterState {
@@ -268,19 +358,23 @@ pub struct LoginLimiter {
 impl LoginLimiter {
     pub fn allowed(&self, key: &str) -> bool {
         let now = Instant::now();
-        let mut state = self.state.lock().expect("login limiter lock");
-        Self::cleanup(&mut state, now);
+        let mut state = self.lock_and_clean(now);
+        Self::allowed_locked(&mut state, key, now)
+    }
 
-        if let Some(attempt) = state.attempts.get_mut(key) {
-            attempt.last_seen = now;
-            if let Some(until) = attempt.blocked_until {
-                if until > now {
-                    return false;
-                }
-                attempt.failures = 0;
-                attempt.blocked_until = None;
-            }
+    /// Atomically checks the block and counts this attempt before any slow
+    /// work runs, so concurrent requests cannot all slip past the limit.
+    /// Call `record_success` afterwards to clear the counter.
+    pub fn try_acquire(&self, key: &str) -> bool {
+        self.try_acquire_at(key, Instant::now())
+    }
+
+    fn try_acquire_at(&self, key: &str, now: Instant) -> bool {
+        let mut state = self.lock_and_clean(now);
+        if !Self::allowed_locked(&mut state, key, now) {
+            return false;
         }
+        Self::record_attempt_locked(&mut state, key, now);
         true
     }
 
@@ -290,9 +384,37 @@ impl LoginLimiter {
 
     pub fn record_attempt(&self, key: &str) {
         let now = Instant::now();
+        let mut state = self.lock_and_clean(now);
+        Self::record_attempt_locked(&mut state, key, now);
+    }
+
+    fn lock_and_clean(&self, now: Instant) -> std::sync::MutexGuard<'_, LoginLimiterState> {
         let mut state = self.state.lock().expect("login limiter lock");
         Self::cleanup(&mut state, now);
+        state
+    }
 
+    fn allowed_locked(state: &mut LoginLimiterState, key: &str, now: Instant) -> bool {
+        if let Some(attempt) = state.attempts.get_mut(key) {
+            if let Some(until) = attempt.blocked_until {
+                if until > now {
+                    return false;
+                }
+                attempt.blocked_until = None;
+                Self::reset_window(attempt, now);
+            } else if now.duration_since(attempt.window_start) >= LOGIN_ATTEMPT_TTL {
+                Self::reset_window(attempt, now);
+            }
+        }
+        true
+    }
+
+    fn reset_window(attempt: &mut Attempt, now: Instant) {
+        attempt.failures = 0;
+        attempt.window_start = now;
+    }
+
+    fn record_attempt_locked(state: &mut LoginLimiterState, key: &str, now: Instant) {
         if !state.attempts.contains_key(key) && state.attempts.len() >= MAX_LOGIN_KEYS {
             // Keep the unauthenticated limiter bounded. Prefer evicting an
             // unblocked entry; fall back to any entry only if all are blocked.
@@ -315,12 +437,11 @@ impl LoginLimiter {
         let entry = state.attempts.entry(key.to_string()).or_insert(Attempt {
             failures: 0,
             blocked_until: None,
-            last_seen: now,
+            window_start: now,
         });
-        entry.last_seen = now;
         entry.failures += 1;
-        if entry.failures >= 5 {
-            entry.blocked_until = Some(now + Duration::from_secs(10 * 60));
+        if entry.failures >= MAX_LOGIN_ATTEMPTS {
+            entry.blocked_until = Some(now + LOGIN_BLOCK_DURATION);
         }
     }
 
@@ -345,7 +466,7 @@ impl LoginLimiter {
             attempt
                 .blocked_until
                 .map(|until| until > now)
-                .unwrap_or_else(|| now.duration_since(attempt.last_seen) < LOGIN_ATTEMPT_TTL)
+                .unwrap_or_else(|| now.duration_since(attempt.window_start) < LOGIN_ATTEMPT_TTL)
         });
         state.last_cleanup = Some(now);
     }
@@ -371,6 +492,66 @@ mod tests {
             limiter.record_failure(key);
         }
         assert!(!limiter.allowed(key));
+    }
+
+    #[test]
+    fn try_acquire_counts_attempts_before_they_finish() {
+        // Concurrent logins must not all pass the check before any failure is
+        // recorded, so the slot is taken up front.
+        let limiter = LoginLimiter::default();
+        let key = "127.0.0.1";
+        for _ in 0..5 {
+            assert!(limiter.try_acquire(key));
+        }
+        assert!(!limiter.try_acquire(key));
+    }
+
+    #[test]
+    fn attempts_expire_after_the_window() {
+        let limiter = LoginLimiter::default();
+        let key = "comment:127.0.0.1";
+        let start = Instant::now();
+        for _ in 0..4 {
+            assert!(limiter.try_acquire_at(key, start));
+        }
+        let later = start + LOGIN_ATTEMPT_TTL + Duration::from_secs(1);
+        for _ in 0..4 {
+            assert!(limiter.try_acquire_at(key, later));
+        }
+    }
+
+    #[test]
+    fn successful_login_resets_acquired_attempts() {
+        let limiter = LoginLimiter::default();
+        let key = "127.0.0.1";
+        for _ in 0..4 {
+            assert!(limiter.try_acquire(key));
+        }
+        limiter.record_success(key);
+        for _ in 0..5 {
+            assert!(limiter.try_acquire(key));
+        }
+    }
+
+    #[tokio::test]
+    async fn login_password_check_verifies_off_the_async_runtime() {
+        let hash = hash_password("correct horse battery staple").unwrap();
+        assert!(
+            check_login_password("correct horse battery staple".into(), Some(hash.clone())).await
+        );
+        assert!(!check_login_password("wrong".into(), Some(hash)).await);
+    }
+
+    #[tokio::test]
+    async fn login_password_check_rejects_unknown_users() {
+        assert!(!check_login_password("anything".into(), None).await);
+    }
+
+    #[test]
+    fn dummy_hash_uses_the_same_parameters_as_real_hashes() {
+        let real = hash_password("x").unwrap();
+        let params = |hash: &str| hash.rsplitn(3, '$').nth(2).unwrap_or_default().to_string();
+        assert_eq!(params(&real), params(&DUMMY_PASSWORD_HASH));
     }
 
     #[test]

@@ -52,7 +52,10 @@
       return { forbidden: true };
     }
 
-    const quote = selection.toString();
+    // range.toString() concatenates text nodes exactly like textContent, so the quote
+    // lines up with the offsets below; selection.toString() uses innerText-style
+    // separators ("\n\n" between paragraphs) and would break cross-paragraph quotes.
+    const quote = range.toString();
     if (!quote.trim()) return null;
     if (quote.length > MAX_QUOTE) return { tooLong: true };
 

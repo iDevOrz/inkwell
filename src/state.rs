@@ -12,4 +12,6 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub storage: Arc<dyn Storage>,
     pub login_limiter: Arc<LoginLimiter>,
+    /// Separate from logins so comment traffic cannot evict or block login state.
+    pub comment_limiter: Arc<LoginLimiter>,
 }

@@ -3,14 +3,27 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import requests
 from bs4 import BeautifulSoup
+from requests.structures import CaseInsensitiveDict
 
 import import_devorz
+
+
+@contextmanager
+def open_db(*args, **kwargs):
+    """Like ``with sqlite3.connect(...)`` (commit on success) but also closes."""
+    conn = sqlite3.connect(*args, **kwargs)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 class ImporterSafetyTests(unittest.TestCase):
@@ -46,8 +59,8 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_dry_run_database_connection_is_read_only(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
-            with sqlite3.connect(db_path) as setup:
+            db_path = Path(directory) / "inkwell.db"
+            with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
 
             conn = import_devorz.connect_database(db_path, read_only=True)
@@ -57,8 +70,8 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_rejects_a_different_mcp_instance_before_writes(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
-            with sqlite3.connect(db_path) as setup:
+            db_path = Path(directory) / "inkwell.db"
+            with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
                     "INSERT INTO settings(name, value) VALUES(?, ?)",
@@ -89,8 +102,8 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_rejects_a_cloned_database_and_cleans_probe(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
-            with sqlite3.connect(db_path) as setup:
+            db_path = Path(directory) / "inkwell.db"
+            with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
                     "INSERT INTO settings(name, value) VALUES(?, ?)",
@@ -124,8 +137,8 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_import_verifies_the_exact_shared_database_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
-            with sqlite3.connect(db_path) as setup:
+            db_path = Path(directory) / "inkwell.db"
+            with open_db(db_path) as setup:
                 setup.execute("CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT)")
                 setup.executemany(
                     "INSERT INTO settings(name, value) VALUES(?, ?)",
@@ -139,7 +152,7 @@ class ImporterSafetyTests(unittest.TestCase):
             def mock_mcp_tool(_session, _url, _token, _name, arguments):
                 probe_matches = False
                 if "probe" in arguments:
-                    with sqlite3.connect(db_path) as remote_db:
+                    with open_db(db_path) as remote_db:
                         row = remote_db.execute(
                             "SELECT value FROM settings WHERE name = ?",
                             (import_devorz.IMPORT_PROBE_SETTING,),
@@ -166,9 +179,9 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_main_stops_before_discovery_when_target_mismatches(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             uploads_dir = Path(directory) / "uploads"
-            with sqlite3.connect(db_path) as setup:
+            with open_db(db_path) as setup:
                 setup.executescript(
                     "CREATE TABLE users(id INTEGER PRIMARY KEY);"
                     "CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT);"
@@ -205,7 +218,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
             discover.assert_not_called()
             self.assertFalse(uploads_dir.exists())
-            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as check:
+            with open_db(f"file:{db_path}?mode=ro", uri=True) as check:
                 self.assertEqual(
                     check.execute("SELECT COUNT(*) FROM users").fetchone()[0],
                     1,
@@ -213,9 +226,9 @@ class ImporterSafetyTests(unittest.TestCase):
 
     def test_dry_run_main_performs_no_database_or_upload_writes(self):
         with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "typecho.db"
+            db_path = Path(directory) / "inkwell.db"
             uploads_dir = Path(directory) / "uploads"
-            with sqlite3.connect(db_path) as setup:
+            with open_db(db_path) as setup:
                 setup.executescript(
                     "CREATE TABLE users(id INTEGER PRIMARY KEY);"
                     "CREATE TABLE settings(name TEXT PRIMARY KEY, value TEXT);"
@@ -252,7 +265,7 @@ class ImporterSafetyTests(unittest.TestCase):
 
             mcp.assert_not_called()
             self.assertFalse(uploads_dir.exists())
-            with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as check:
+            with open_db(f"file:{db_path}?mode=ro", uri=True) as check:
                 self.assertEqual(
                     check.execute("SELECT COUNT(*) FROM contents").fetchone()[0],
                     0,
@@ -281,5 +294,188 @@ class ImporterSafetyTests(unittest.TestCase):
         conn.close()
 
 
+PUBLIC_ADDRINFO = [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+
+def fake_response(status=200, body=b"", headers=None, location=None):
+    response = requests.Response()
+    response.status_code = status
+    response.headers = CaseInsensitiveDict(headers or {})
+    if location is not None:
+        response.headers["location"] = location
+    response.raw = io.BytesIO(body)
+    return response
+
+
+class FenceTests(unittest.TestCase):
+    def test_fence_is_longer_than_longest_backtick_run(self):
+        self.assertEqual(import_devorz.fence_for("print(1)"), "```")
+        self.assertEqual(import_devorz.fence_for("use `x` here"), "```")
+        self.assertEqual(import_devorz.fence_for("```py\ncode\n```"), "````")
+        self.assertEqual(import_devorz.fence_for("a ```` b ``` c"), "`````")
+
+
+class SafeFetchTests(unittest.TestCase):
+    def test_rejects_non_http_schemes(self):
+        for url in ("file:///etc/passwd", "ftp://example.com/x", "gopher://example.com"):
+            with self.assertRaisesRegex(ValueError, "non-http"):
+                import_devorz.ensure_public_url(url)
+
+    def test_rejects_private_loopback_and_link_local_addresses(self):
+        for address in ("127.0.0.1", "10.0.0.5", "192.168.1.1", "169.254.169.254", "::1"):
+            info = [(2, 1, 6, "", (address, 80))]
+            with patch.object(import_devorz.socket, "getaddrinfo", return_value=info):
+                with self.assertRaisesRegex(ValueError, "non-public"):
+                    import_devorz.ensure_public_url("http://internal.example/")
+
+    def test_allows_public_address(self):
+        with patch.object(
+            import_devorz.socket, "getaddrinfo", return_value=PUBLIC_ADDRINFO
+        ):
+            import_devorz.ensure_public_url("https://source.example/a.html")
+
+    def test_redirect_to_private_host_is_rejected_before_request(self):
+        session = Mock()
+        session.get.return_value = fake_response(
+            status=302, location="http://metadata.internal/latest"
+        )
+
+        def resolve(host, *_args, **_kwargs):
+            address = "169.254.169.254" if host == "metadata.internal" else "93.184.216.34"
+            return [(2, 1, 6, "", (address, 80))]
+
+        with patch.object(import_devorz.socket, "getaddrinfo", side_effect=resolve):
+            with self.assertRaisesRegex(ValueError, "non-public"):
+                import_devorz.fetch(session, "https://source.example/a.html")
+        self.assertEqual(session.get.call_count, 1)
+        _, kwargs = session.get.call_args
+        self.assertTrue(kwargs["stream"])
+        self.assertFalse(kwargs["allow_redirects"])
+
+    def test_follows_public_redirect_and_buffers_body(self):
+        session = Mock()
+        final = fake_response(body=b"<html>ok</html>", headers={"content-type": "text/html"})
+        session.get.side_effect = [
+            fake_response(status=301, location="/moved.html"),
+            final,
+        ]
+        with patch.object(
+            import_devorz.socket, "getaddrinfo", return_value=PUBLIC_ADDRINFO
+        ):
+            response = import_devorz.fetch(session, "https://source.example/a.html")
+        self.assertEqual(response.content, b"<html>ok</html>")
+        self.assertEqual(
+            session.get.call_args_list[1].args[0], "https://source.example/moved.html"
+        )
+
+    def test_body_over_limit_is_rejected(self):
+        session = Mock()
+        session.get.return_value = fake_response(body=b"x" * 20)
+        with patch.object(
+            import_devorz.socket, "getaddrinfo", return_value=PUBLIC_ADDRINFO
+        ):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                import_devorz.fetch(session, "https://source.example/a.png", max_bytes=10)
+
+    def test_declared_length_over_limit_is_rejected_without_reading(self):
+        # Empty body: only the Content-Length check can reject this response.
+        session = Mock()
+        response = fake_response(headers={"content-length": "999"})
+        session.get.return_value = response
+        with patch.object(
+            import_devorz.socket, "getaddrinfo", return_value=PUBLIC_ADDRINFO
+        ):
+            with self.assertRaisesRegex(ValueError, "too large"):
+                import_devorz.fetch(session, "https://source.example/a.png", max_bytes=10)
+
+
+ARTICLE_HTML = """
+<html><head><meta name="keywords" content="a,b"></head><body>
+<h1 class="posttitle">Existing Title</h1>
+<time datetime="2024-01-02"></time>
+<div id="post-content"><p>Body</p><img src="/img/one.png"></div>
+</body></html>
+"""
+
+
+class ExistingArticleTests(unittest.TestCase):
+    def make_conn(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(
+            "CREATE TABLE contents(id INTEGER PRIMARY KEY, title TEXT, slug TEXT);"
+            "CREATE TABLE media(id INTEGER PRIMARY KEY, storage_key TEXT, original_name TEXT, "
+            "mime TEXT, size INTEGER, width INTEGER, height INTEGER, uploader_id INTEGER, "
+            "created_at INTEGER);"
+        )
+        return conn
+
+    def test_parse_article_skips_existing_title_before_downloading_images(self):
+        conn = self.make_conn()
+        conn.execute("INSERT INTO contents VALUES(3, 'Existing Title', 'other')")
+        page = Mock(text=ARTICLE_HTML)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(import_devorz, "fetch", return_value=page),
+            patch.object(import_devorz, "download_image") as download,
+        ):
+            with self.assertRaises(import_devorz.AlreadyImported) as caught:
+                import_devorz.parse_article(
+                    Mock(),
+                    "https://source.example/archives/42.html",
+                    Path(directory),
+                    conn,
+                    admin_id=1,
+                    no_images=False,
+                    dry_run=False,
+                )
+        self.assertEqual(caught.exception.content_id, 3)
+        download.assert_not_called()
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM media").fetchone()[0], 0)
+        conn.close()
+
+    def test_main_skips_existing_slug_without_fetching(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "inkwell.db"
+            with open_db(db_path) as setup:
+                setup.executescript(
+                    "CREATE TABLE users(id INTEGER PRIMARY KEY);"
+                    "CREATE TABLE contents(id INTEGER PRIMARY KEY, title TEXT, slug TEXT);"
+                    "INSERT INTO users VALUES(1);"
+                    "INSERT INTO contents VALUES(5, 'Old', '42');"
+                )
+            argv = [
+                "import_devorz.py",
+                "--dry-run",
+                "--db",
+                str(db_path),
+                "--uploads",
+                str(Path(directory) / "uploads"),
+            ]
+            output = io.StringIO()
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(
+                    import_devorz,
+                    "discover_articles",
+                    return_value=["https://source.example/archives/42.html"],
+                ),
+                patch.object(import_devorz, "parse_article") as parse,
+                redirect_stdout(output),
+            ):
+                self.assertEqual(import_devorz.main(), 0)
+            parse.assert_not_called()
+            self.assertIn("skipped=1", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultDatabaseTests(unittest.TestCase):
+    def test_prefers_current_name_and_keeps_legacy_installs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("inkwell.db"))
+            (Path(directory) / "typecho.db").touch()
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("typecho.db"))
+            (Path(directory) / "inkwell.db").touch()
+            self.assertTrue(import_devorz.default_db_path(directory).endswith("inkwell.db"))

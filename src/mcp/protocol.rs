@@ -4,10 +4,13 @@ use serde_json::{Value, json};
 use crate::repo::token::McpPrincipal;
 use crate::state::AppState;
 
-use super::tools;
+use super::tools::{self, RESOURCE_SCHEME};
 
 pub const DEFAULT_PROTOCOL_VERSION: &str = "2024-11-05";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
+/// Requests run sequentially, so cap a batch to keep one HTTP call bounded.
+pub const MAX_BATCH_REQUESTS: usize = 50;
+const INVALID_REQUEST: i64 = -32600;
 
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
@@ -41,6 +44,17 @@ pub async fn handle_value(
     value: Value,
 ) -> Option<Value> {
     match value {
+        Value::Array(items) if items.is_empty() => Some(error_response(
+            Value::Null,
+            RpcError::new(INVALID_REQUEST, "批量请求不能为空"),
+        )),
+        Value::Array(items) if items.len() > MAX_BATCH_REQUESTS => Some(error_response(
+            Value::Null,
+            RpcError::new(
+                INVALID_REQUEST,
+                format!("批量请求最多 {MAX_BATCH_REQUESTS} 条"),
+            ),
+        )),
         Value::Array(items) => {
             let mut responses = Vec::new();
             for item in items {
@@ -59,18 +73,25 @@ pub async fn handle_value(
 }
 
 async fn handle_request(state: &AppState, principal: &McpPrincipal, value: Value) -> Option<Value> {
+    // A notification is a request *without* an id member; `"id": null` is a
+    // request that still expects a response, so check the raw object.
+    let raw_id = value
+        .as_object()
+        .and_then(|object| object.get("id"))
+        .cloned();
+    let is_notification = raw_id.is_none();
+    // The body already parsed as JSON, so a shape error is an invalid request.
     let request: JsonRpcRequest = match serde_json::from_value(value) {
         Ok(request) => request,
         Err(error) => {
             return Some(error_response(
-                Value::Null,
-                RpcError::new(-32700, format!("JSON 解析失败: {error}")),
+                raw_id.unwrap_or(Value::Null),
+                RpcError::new(INVALID_REQUEST, format!("无效的 JSON-RPC 请求: {error}")),
             ));
         }
     };
 
-    let id = request.id.clone();
-    let is_notification = id.is_none();
+    let id = raw_id;
     let params = request.params.unwrap_or_else(|| json!({}));
 
     let result = match request.method.as_str() {
@@ -83,21 +104,33 @@ async fn handle_request(state: &AppState, principal: &McpPrincipal, value: Value
             Some(json!({
                 "resources": [
                     {
-                        "uri": "typecho://review/queue",
+                        "uri": format!("{RESOURCE_SCHEME}review/queue"),
                         "name": "Review queue",
                         "description": "Content waiting for review and comments waiting for moderation",
                         "mimeType": "application/json"
                     },
                     {
-                        "uri": "typecho://notes/recent",
+                        "uri": format!("{RESOURCE_SCHEME}notes/recent"),
                         "name": "Recent notes",
                         "description": "The most recently updated private notes",
                         "mimeType": "application/json"
                     },
                     {
-                        "uri": "typecho://annotations/queue",
+                        "uri": format!("{RESOURCE_SCHEME}annotations/queue"),
                         "name": "Open annotations",
                         "description": "Inline and general annotations waiting for AI edits",
+                        "mimeType": "application/json"
+                    }
+                ]
+            }))
+        }),
+        "resources/templates/list" => require_read(principal).map(|_| {
+            Some(json!({
+                "resourceTemplates": [
+                    {
+                        "uriTemplate": format!("{RESOURCE_SCHEME}content/{{id}}"),
+                        "name": "Content by id",
+                        "description": "One post, page or note with body, metadata and revisions",
                         "mimeType": "application/json"
                     }
                 ]
@@ -193,7 +226,7 @@ async fn handle_resources_read(state: &AppState, params: &Value) -> Result<Value
 
     let value = tools::resource_value(state, uri)
         .await
-        .map_err(|error| RpcError::new(-32602, error.to_string()))?;
+        .map_err(|error| RpcError::new(-32602, error.message()))?;
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| RpcError::new(-32603, format!("序列化资源失败: {error}")))?;
 

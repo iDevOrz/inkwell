@@ -9,7 +9,7 @@ use axum::http::header::{ALLOW, CONTENT_TYPE, WWW_AUTHENTICATE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::repo::token::{self, McpPrincipal};
 use crate::state::AppState;
@@ -95,9 +95,17 @@ fn unauthorized(message: &str) -> Response {
 }
 
 pub async fn run_stdio(state: AppState) -> anyhow::Result<()> {
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let mut stdout = tokio::io::stdout();
+    serve_lines(&state, tokio::io::stdin(), tokio::io::stdout()).await
+}
+
+/// Serves newline-delimited JSON-RPC from `input`, writing one response line
+/// per request to `output`. Local (stdio) callers get full scopes.
+pub async fn serve_lines<R, W>(state: &AppState, input: R, mut output: W) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut lines = BufReader::new(input).lines();
     let principal = McpPrincipal::local();
 
     while let Some(line) = lines.next_line().await? {
@@ -106,31 +114,29 @@ pub async fn run_stdio(state: AppState) -> anyhow::Result<()> {
             continue;
         }
 
-        let value: Value = match serde_json::from_str(line) {
-            Ok(value) => value,
-            Err(error) => {
-                let response = json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": {"code": -32700, "message": format!("JSON 解析失败: {error}")}
-                });
-                write_response(&mut stdout, &response).await?;
-                continue;
-            }
+        let response = match serde_json::from_str::<Value>(line) {
+            Ok(value) => protocol::handle_value(state, &principal, value).await,
+            Err(error) => Some(json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": {"code": -32700, "message": format!("JSON 解析失败: {error}")}
+            })),
         };
-
-        if let Some(response) = protocol::handle_value(&state, &principal, value).await {
-            write_response(&mut stdout, &response).await?;
+        if let Some(response) = response {
+            write_response(&mut output, &response).await?;
         }
     }
 
     Ok(())
 }
 
-async fn write_response(stdout: &mut tokio::io::Stdout, response: &Value) -> anyhow::Result<()> {
+async fn write_response<W: AsyncWrite + Unpin>(
+    output: &mut W,
+    response: &Value,
+) -> anyhow::Result<()> {
     let text = serde_json::to_string(response).context("serialize MCP response")?;
-    stdout.write_all(text.as_bytes()).await?;
-    stdout.write_all(b"\n").await?;
-    stdout.flush().await?;
+    output.write_all(text.as_bytes()).await?;
+    output.write_all(b"\n").await?;
+    output.flush().await?;
     Ok(())
 }

@@ -243,18 +243,12 @@ pub async fn reply(
     {
         return Err(AppError::bad_request("非法的批注状态"));
     }
-    let current = get(pool, id)
+    get(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("批注不存在"))?;
     let now = now_ts();
-    let next_status = status.unwrap_or(&current.status);
-    let resolved_at = if next_status == "resolved" {
-        Some(now)
-    } else {
-        None
-    };
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     sqlx::query(
         "INSERT INTO annotation_replies(annotation_id, author, body, created_at) \
          VALUES(?, ?, ?, ?)",
@@ -265,13 +259,24 @@ pub async fn reply(
     .bind(now)
     .execute(&mut *transaction)
     .await?;
-    sqlx::query("UPDATE annotations SET status = ?, updated_at = ?, resolved_at = ? WHERE id = ?")
-        .bind(next_status)
-        .bind(now)
-        .bind(resolved_at)
-        .bind(id)
-        .execute(&mut *transaction)
-        .await?;
+    // Without an explicit status, keep whatever is stored at write time so a
+    // reply never reverts a concurrent resolve by the author.
+    sqlx::query(
+        "UPDATE annotations SET \
+             status = COALESCE(?1, status), \
+             updated_at = ?2, \
+             resolved_at = CASE \
+                 WHEN ?1 IS NULL THEN resolved_at \
+                 WHEN ?1 = 'resolved' THEN ?2 \
+                 ELSE NULL \
+             END \
+         WHERE id = ?3",
+    )
+    .bind(status)
+    .bind(now)
+    .bind(id)
+    .execute(&mut *transaction)
+    .await?;
     transaction.commit().await?;
 
     get(pool, id)

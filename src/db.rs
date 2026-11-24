@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::config::Config;
 
@@ -41,6 +41,13 @@ pub async fn connect(config: &Config) -> Result<SqlitePool> {
         .context("run database migrations")?;
 
     Ok(pool)
+}
+
+/// Starts a transaction that will write. `BEGIN IMMEDIATE` takes the write
+/// lock up front, so concurrent writers wait (up to the busy timeout) instead
+/// of failing with SQLITE_BUSY when a read snapshot cannot be upgraded.
+pub async fn begin_write(pool: &SqlitePool) -> sqlx::Result<Transaction<'static, Sqlite>> {
+    pool.begin_with("BEGIN IMMEDIATE").await
 }
 
 #[cfg(unix)]

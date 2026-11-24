@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use inkwell::{app, config::Config, db, mcp};
+use inkwell::{app, config::Config, db, health, mcp};
 use std::net::SocketAddr;
 use tracing_subscriber::EnvFilter;
 
@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
             let state = app::build_state(config).await?;
             mcp::run_stdio(state).await
         }
+        "healthcheck" => health::probe(config.bind_addr),
         "migrate" => {
             let _pool = db::connect(&config).await?;
             println!("database is up to date");
@@ -70,11 +71,12 @@ fn print_help() {
            inkwell serve        Start the web server (default)\n\
            inkwell mcp          Start the MCP server over stdio\n\
            inkwell migrate      Create/upgrade the database and exit\n\
+           inkwell healthcheck  Exit 0 if the server at BIND_ADDR answers /healthz\n\
          \n\
          Environment:\n\
            BIND_ADDR        default 127.0.0.1:3000\n\
            DATA_DIR         default ./data\n\
-           DATABASE_URL     default sqlite://<DATA_DIR>/typecho.db\n\
+           DATABASE_URL     default sqlite://<DATA_DIR>/inkwell.db (existing typecho.db is kept)\n\
            SITE_URL         public site URL, default http://127.0.0.1:3000\n\
            ADMIN_USER       default admin\n\
            ADMIN_PASSWORD   initial password; generated if omitted\n\

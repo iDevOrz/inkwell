@@ -3,15 +3,17 @@ pub mod public;
 pub mod templates;
 pub mod views;
 
+use axum::Json;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use include_dir::{Dir, include_dir};
+use serde_json::json;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
@@ -34,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/atom.xml", get(public::feed_atom))
         .route("/sitemap.xml", get(public::sitemap))
         .route("/robots.txt", get(public::robots))
+        .route(crate::health::HEALTH_PATH, get(healthz))
         .route("/media/{*path}", get(public::media))
         .route("/comments/{id}", post(public::comment))
         .route("/mcp", post(crate::mcp::http).get(crate::mcp::http_get))
@@ -45,6 +48,26 @@ pub fn router(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(security_headers))
         .with_state(state)
+}
+
+/// Liveness probe for Docker and CI: 200 when the database answers, else 503.
+async fn healthz(State(state): State<AppState>) -> Response {
+    let (status, label) = match sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.db)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, "ok"),
+        Err(error) => {
+            tracing::warn!(%error, "health check failed");
+            (StatusCode::SERVICE_UNAVAILABLE, "unavailable")
+        }
+    };
+    (
+        status,
+        [(CACHE_CONTROL, "no-store")],
+        Json(json!({ "status": label })),
+    )
+        .into_response()
 }
 
 async fn vditor_asset(Path(path): Path<String>) -> Response {
@@ -119,10 +142,20 @@ async fn static_asset(Path(path): Path<String>) -> Response {
         .into_response()
 }
 
+/// The hash allows Vditor's icon sprite: the editor fetches
+/// `static/vditor/dist/js/icons/ant.js` with XHR and injects it as an inline
+/// script, so it must match that file exactly. A unit test recomputes it.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
+     img-src 'self' data: https:; \
+     style-src 'self' 'unsafe-inline'; \
+     script-src 'self' 'sha256-qR4U4J3Ne5n0m3uNzGMB/tZ3TWJUf89OlxdXqjqALDM='; \
+     frame-ancestors 'none'; \
+     base-uri 'self'; \
+     form-action 'self'";
+
 async fn security_headers(request: Request<Body>, next: Next) -> Response {
     let path = request.uri().path();
-    let has_session =
-        crate::auth::cookie_value(request.headers(), crate::auth::SESSION_COOKIE).is_some();
+    let has_session = crate::auth::session_token(request.headers()).is_some();
     let public_asset = path.starts_with("/static/") || path.starts_with("/media/");
     let private_response =
         !public_asset && (path.starts_with("/admin") || path == "/mcp" || has_session);
@@ -143,18 +176,28 @@ async fn security_headers(request: Request<Body>, next: Next) -> Response {
     );
     headers.insert(
         "content-security-policy",
-        HeaderValue::from_static(
-            "default-src 'self'; \
-             img-src 'self' data: https:; \
-             style-src 'self' 'unsafe-inline'; \
-             script-src 'self' 'sha256-qR4U4J3Ne5n0m3uNzGMB/tZ3TWJUf89OlxdXqjqALDM='; \
-             frame-ancestors 'none'; \
-             base-uri 'self'; \
-             form-action 'self'",
-        ),
+        HeaderValue::from_static(CONTENT_SECURITY_POLICY),
     );
     if private_response {
         headers.insert("cache-control", HeaderValue::from_static("no-store"));
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    use super::CONTENT_SECURITY_POLICY;
+
+    #[test]
+    fn csp_allows_the_inlined_vditor_icon_script() {
+        let script = include_bytes!("../../static/vditor/dist/js/icons/ant.js");
+        let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(script));
+        assert!(
+            CONTENT_SECURITY_POLICY.contains(&format!("'sha256-{hash}'")),
+            "update the CSP hash after upgrading Vditor: sha256-{hash}"
+        );
+    }
 }

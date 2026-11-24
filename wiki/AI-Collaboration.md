@@ -8,7 +8,7 @@ Inkwell 的 AI 写作流程以“批注 + 待审版本”为中心。AI 不会�
 2. 选中正文片段并写批注，或添加整体评价。
 3. AI 通过 MCP 的 `annotation_queue` 拉取未处理意见。
 4. AI 使用 `content_get` 读取原文，根据意见生成完整改写版本。
-5. AI 用 `proposal_create` 把版本附加到原内容，并通过 `annotation_reply` 说明处理结果。
+5. AI 用 `proposal_create` 把版本附加到原内容，并通过 `annotation_reply` 说明处理结果。调用时应带上第 4 步读到的 `updated_at`（参数 `expected_updated_at`）或最新修订号（`base_revision_id`）；如果原文在此期间被修改，创建会以冲突失败，AI 需要重新读取后再改写。
 6. 作者查看结果预览和 diff。应用时提交页面上显示的提案版本号。
 7. 应用后生成常规 revision；发布仍由作者确认。
 
@@ -19,7 +19,7 @@ Inkwell 的 AI 写作流程以“批注 + 待审版本”为中心。AI 不会�
 - **划词批注**：保存选区文本及前后文锚点，便于在原文预览中定位。
 - **整体评价**：针对整篇文章提出结构、语气或方向性要求。
 
-批注状态包括 open、addressed、resolved 和 outdated。AI 回复后可标记 addressed；作者确认后再 resolve。
+批注状态包括 open、addressed、resolved 和 outdated。AI 回复后可标记 addressed；作者确认后再 resolve。通过 MCP 关闭批注需要 `review` scope，只有 `write` 的 AI token 只能标记 addressed。AI 回复时如果不带状态，会保留作者当时设置的状态，不会把已 resolve 的批注重新打开。
 
 文章内容后来发生变化时，划词锚点可能无法精确匹配。遇到这种情况，应结合保存的原文引用和前后文人工核对，而不是盲目替换。
 

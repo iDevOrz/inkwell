@@ -40,8 +40,28 @@ pub fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Escapes text for XML and drops characters XML 1.0 forbids (most C0
+/// controls, U+FFFE/U+FFFF); a single one would make a whole feed unparsable.
 pub fn xml_escape(value: &str) -> String {
-    html_escape(value)
+    let allowed: String = value.chars().filter(|ch| is_xml_char(*ch)).collect();
+    html_escape(&allowed)
+}
+
+fn is_xml_char(ch: char) -> bool {
+    matches!(ch, '\t' | '\n' | '\r') || (ch >= ' ' && ch != '\u{FFFE}' && ch != '\u{FFFF}')
+}
+
+/// Characters left as-is in a URL path segment (RFC 3986 unreserved).
+const PATH_SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// Percent-encodes a slug for use in absolute URLs such as sitemap `<loc>`,
+/// which must be valid URIs (Chinese slugs are otherwise emitted raw).
+pub fn path_segment(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, PATH_SEGMENT).to_string()
 }
 
 pub fn timezone(offset_minutes: i32) -> FixedOffset {
@@ -153,8 +173,9 @@ pub fn safe_next(value: Option<&str>) -> String {
             if next.starts_with('/')
                 && !next.starts_with("//")
                 && !next.contains('\\')
-                && !next.contains('\n')
-                && !next.contains('\r') =>
+                // Browsers drop tabs/newlines while parsing Location, so any
+                // control character could turn "/\t/host" into "//host".
+                && !next.chars().any(char::is_control) =>
         {
             next.to_string()
         }
@@ -171,7 +192,9 @@ pub fn client_ip(
         let forwarded = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
+            // Only the right-most hop was written by the trusted proxy;
+            // anything to its left is client-controlled.
+            .and_then(|value| value.rsplit(',').next())
             .map(str::trim);
         let real_ip = headers
             .get("x-real-ip")
@@ -213,6 +236,19 @@ mod tests {
     }
 
     #[test]
+    fn xml_escape_drops_characters_invalid_in_xml() {
+        assert_eq!(xml_escape("a\u{0B}b\u{0C}c\u{FFFF}<"), "abc&lt;");
+        assert_eq!(xml_escape("tab\tline\n"), "tab\tline\n");
+    }
+
+    #[test]
+    fn path_segment_encodes_non_ascii_and_reserved() {
+        assert_eq!(path_segment("rust-笔记"), "rust-%E7%AC%94%E8%AE%B0");
+        assert_eq!(path_segment("a b/c?d"), "a%20b%2Fc%3Fd");
+        assert_eq!(path_segment("ok-1_2.3~"), "ok-1_2.3~");
+    }
+
+    #[test]
     fn like_pattern_escapes_wildcards() {
         assert_eq!(like_pattern("100%_ok"), "%100\\%\\_ok%");
     }
@@ -225,12 +261,38 @@ mod tests {
     }
 
     #[test]
+    fn safe_next_rejects_control_characters() {
+        // Browsers strip tabs/newlines while parsing Location, turning
+        // "/\t/evil.example" into the protocol-relative "//evil.example".
+        assert_eq!(safe_next(Some("/\t/evil.example")), "/admin");
+        assert_eq!(safe_next(Some("/\u{0}/evil.example")), "/admin");
+        assert_eq!(
+            safe_next(Some("/admin/posts?page=2")),
+            "/admin/posts?page=2"
+        );
+    }
+
+    #[test]
     fn forwarded_ip_is_ignored_unless_proxy_trust_is_enabled() {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-forwarded-for", "198.51.100.77".parse().unwrap());
         let peer = "192.0.2.10:3000".parse().unwrap();
 
         assert_eq!(client_ip(&headers, peer, false), "192.0.2.10");
+        assert_eq!(client_ip(&headers, peer, true), "198.51.100.77");
+    }
+
+    #[test]
+    fn forwarded_ip_uses_hop_appended_by_trusted_proxy() {
+        // A client can prepend arbitrary values; only the right-most entry was
+        // written by the trusted proxy in front of the app.
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "203.0.113.9, 198.51.100.77".parse().unwrap(),
+        );
+        let peer = "192.0.2.10:3000".parse().unwrap();
+
         assert_eq!(client_ip(&headers, peer, true), "198.51.100.77");
     }
 }

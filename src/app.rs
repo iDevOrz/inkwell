@@ -22,6 +22,7 @@ pub async fn build_state(config: Config) -> Result<AppState> {
         config: Arc::new(config),
         storage,
         login_limiter: Arc::new(LoginLimiter::default()),
+        comment_limiter: Arc::new(LoginLimiter::default()),
     })
 }
 

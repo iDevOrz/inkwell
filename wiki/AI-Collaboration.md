@@ -8,7 +8,7 @@ Inkwell 的 AI 写作流程以“批注 + 待审版本”为中心。AI 不会�
 2. 选中正文片段并写批注，或添加整体评价。
 3. AI 通过 MCP 的 `annotation_queue` 拉取未处理意见。
 4. AI 使用 `content_get` 读取原文，根据意见生成完整改写版本。
-5. AI 用 `proposal_create` 把版本附加到原内容，并通过 `annotation_reply` 说明处理结果。
+5. AI 用 `proposal_create` 把版本附加到原内容，并通过 `annotation_reply` 说明处理结果。调用时应带上第 4 步读到的 `updated_at`（参数 `expected_updated_at`）或最新修订号（`base_revision_id`）；如果原文在此期间被修改，创建会以冲突失败，AI 需要重新读取后再改写。
 6. 作者查看结果预览和 diff。应用时提交页面上显示的提案版本号。
 7. 应用后生成常规 revision；发布仍由作者确认。
 

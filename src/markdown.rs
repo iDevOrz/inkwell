@@ -12,6 +12,16 @@ pub struct WikiTarget {
     pub href: Option<String>,
 }
 
+const MAX_HEADING_ID_CHARS: usize = 100;
+
+fn is_safe_heading_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().count() <= MAX_HEADING_ID_CHARS
+        && id
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
+}
+
 pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String {
     let body = body.replace("<!--more-->", "");
     let expanded = expand_wiki_links(&body, wiki);
@@ -91,6 +101,16 @@ pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String
                     dest_url,
                     title,
                     id,
+                }));
+            }
+            Event::Start(Tag::Heading { level, id, .. }) => {
+                // `{#id .class key=value}` is allowed for anchors only: classes and
+                // arbitrary attributes (style=, data-*) could restyle the page.
+                events.push(Event::Start(Tag::Heading {
+                    level,
+                    id: id.filter(|value| is_safe_heading_id(value)),
+                    classes: Vec::new(),
+                    attrs: Vec::new(),
                 }));
             }
             Event::Html(raw) | Event::InlineHtml(raw) => {
@@ -354,6 +374,24 @@ fn theme_set() -> &'static ThemeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heading_attributes_cannot_inject_styles_or_classes() {
+        let html = render_markdown(
+            "# Login {#intro .overlay style=position:fixed onclick=x}",
+            &HashMap::new(),
+        );
+        assert!(html.contains("id=\"intro\""));
+        assert!(!html.contains("style"));
+        assert!(!html.contains("overlay"));
+        assert!(!html.contains("onclick"));
+    }
+
+    #[test]
+    fn heading_ids_with_unsafe_characters_are_dropped() {
+        let html = render_markdown("# Title {#bad\"id}", &HashMap::new());
+        assert!(!html.contains("id="));
+    }
 
     #[test]
     fn raw_html_is_escaped() {

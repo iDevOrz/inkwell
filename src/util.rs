@@ -153,8 +153,9 @@ pub fn safe_next(value: Option<&str>) -> String {
             if next.starts_with('/')
                 && !next.starts_with("//")
                 && !next.contains('\\')
-                && !next.contains('\n')
-                && !next.contains('\r') =>
+                // Browsers drop tabs/newlines while parsing Location, so any
+                // control character could turn "/\t/host" into "//host".
+                && !next.chars().any(char::is_control) =>
         {
             next.to_string()
         }
@@ -171,7 +172,9 @@ pub fn client_ip(
         let forwarded = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
+            // Only the right-most hop was written by the trusted proxy;
+            // anything to its left is client-controlled.
+            .and_then(|value| value.rsplit(',').next())
             .map(str::trim);
         let real_ip = headers
             .get("x-real-ip")
@@ -225,12 +228,38 @@ mod tests {
     }
 
     #[test]
+    fn safe_next_rejects_control_characters() {
+        // Browsers strip tabs/newlines while parsing Location, turning
+        // "/\t/evil.example" into the protocol-relative "//evil.example".
+        assert_eq!(safe_next(Some("/\t/evil.example")), "/admin");
+        assert_eq!(safe_next(Some("/\u{0}/evil.example")), "/admin");
+        assert_eq!(
+            safe_next(Some("/admin/posts?page=2")),
+            "/admin/posts?page=2"
+        );
+    }
+
+    #[test]
     fn forwarded_ip_is_ignored_unless_proxy_trust_is_enabled() {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("x-forwarded-for", "198.51.100.77".parse().unwrap());
         let peer = "192.0.2.10:3000".parse().unwrap();
 
         assert_eq!(client_ip(&headers, peer, false), "192.0.2.10");
+        assert_eq!(client_ip(&headers, peer, true), "198.51.100.77");
+    }
+
+    #[test]
+    fn forwarded_ip_uses_hop_appended_by_trusted_proxy() {
+        // A client can prepend arbitrary values; only the right-most entry was
+        // written by the trusted proxy in front of the app.
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "203.0.113.9, 198.51.100.77".parse().unwrap(),
+        );
+        let peer = "192.0.2.10:3000".parse().unwrap();
+
         assert_eq!(client_ip(&headers, peer, true), "198.51.100.77");
     }
 }

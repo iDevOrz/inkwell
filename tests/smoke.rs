@@ -1100,3 +1100,82 @@ async fn blog_login_notes_and_mcp_smoke() {
         .expect("concurrent draft exists");
     assert_eq!(persisted.body, "服务器上的较新正文。");
 }
+
+#[tokio::test]
+async fn proposal_create_rejects_stale_base() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let state = app::build_state(test_config(temp.path()))
+        .await
+        .expect("build state");
+    let router =
+        app::router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
+
+    let created = mcp_tool(
+        &router,
+        "content_create",
+        json!({"kind": "post", "title": "冲突测试", "body": "原文。", "status": "draft"}),
+    )
+    .await;
+    assert_eq!(created["isError"], Value::Null);
+    let post_id = created["structuredContent"]["id"]
+        .as_i64()
+        .expect("post id");
+    let created_updated_at = created["structuredContent"]["updated_at"]
+        .as_i64()
+        .expect("updated_at");
+
+    let read_revisions = mcp_tool(&router, "revision_list", json!({"content_id": post_id})).await;
+    let read_revision_id = read_revisions["structuredContent"]["items"][0]["id"]
+        .as_i64()
+        .expect("revision id");
+
+    // The author edits the post after the AI read it.
+    let edited = mcp_tool(
+        &router,
+        "content_update",
+        json!({"id": post_id, "body": "作者改过的原文。"}),
+    )
+    .await;
+    assert_eq!(edited["isError"], Value::Null);
+
+    let stale_revision = mcp_tool(
+        &router,
+        "proposal_create",
+        json!({"content_id": post_id, "body": "AI 版本。", "base_revision_id": read_revision_id}),
+    )
+    .await;
+    assert_eq!(stale_revision["isError"], true, "{stale_revision}");
+
+    let stale_timestamp = mcp_tool(
+        &router,
+        "proposal_create",
+        json!({
+            "content_id": post_id,
+            "body": "AI 版本。",
+            "expected_updated_at": created_updated_at - 1
+        }),
+    )
+    .await;
+    assert_eq!(stale_timestamp["isError"], true, "{stale_timestamp}");
+
+    let latest = mcp_tool(&router, "revision_list", json!({"content_id": post_id})).await;
+    let latest_revision_id = latest["structuredContent"]["items"][0]["id"]
+        .as_i64()
+        .expect("latest revision id");
+    let current = mcp_tool(&router, "content_get", json!({"id": post_id})).await;
+    let current_updated_at = current["structuredContent"]["content"]["updated_at"]
+        .as_i64()
+        .expect("current updated_at");
+    let fresh = mcp_tool(
+        &router,
+        "proposal_create",
+        json!({
+            "content_id": post_id,
+            "body": "AI 版本。",
+            "base_revision_id": latest_revision_id,
+            "expected_updated_at": current_updated_at
+        }),
+    )
+    .await;
+    assert_eq!(fresh["isError"], Value::Null, "{fresh}");
+}

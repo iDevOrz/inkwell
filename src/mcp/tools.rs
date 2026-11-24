@@ -306,7 +306,8 @@ pub fn definitions() -> Value {
                 "body": {"type": "string", "description": "Full proposed Markdown body"},
                 "excerpt": {"type": "string"},
                 "summary": {"type": "string", "description": "What changed in this version"},
-                "base_revision_id": {"type": "integer"}
+                "base_revision_id": {"type": "integer", "description": "Latest revision id you read; rejected with a conflict if the content has a newer revision"},
+                "expected_updated_at": {"type": "integer", "description": "updated_at from content_get; rejected with a conflict if the content changed since. Strongly recommended"}
             }),
             &["content_id", "body"],
         ),
@@ -1066,6 +1067,7 @@ async fn proposal_create(
         ProposalInput {
             content_id,
             base_revision_id: arg_i64(args, "base_revision_id"),
+            expected_updated_at: arg_i64(args, "expected_updated_at"),
             title: arg_str(args, "title"),
             body,
             excerpt: arg_str(args, "excerpt"),

@@ -11,9 +11,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::auth::{
-    AdminSession, AuthSession, LOGIN_CSRF_COOKIE, OptionalUser, clear_login_csrf_cookie,
-    clear_session_cookie, cookie_value, create_session, delete_session, hash_password,
-    login_csrf_cookie, session_cookie, verify_csrf, verify_password,
+    AdminSession, AuthSession, LOGIN_CSRF_COOKIE, OptionalUser, check_login_password,
+    clear_login_csrf_cookie, clear_session_cookie, cookie_value, create_session, delete_session,
+    hash_password_async, login_csrf_cookie, session_cookie, verify_csrf,
 };
 use crate::error::{AppError, AppResult};
 use crate::markdown;
@@ -323,7 +323,7 @@ async fn login_submit(
     }
 
     let ip = client_ip(&headers, peer, state.config.trust_proxy_headers);
-    if !state.login_limiter.allowed(&ip) {
+    if !state.login_limiter.try_acquire(&ip) {
         return render_login(
             &state,
             Some("尝试次数过多，请 10 分钟后再试。".to_string()),
@@ -335,7 +335,6 @@ async fn login_submit(
 
     let username = form.username.trim();
     if username.is_empty() || username.chars().count() > 128 || form.password.len() > 1024 {
-        state.login_limiter.record_failure(&ip);
         return render_login(
             &state,
             Some("用户名或密码错误。".to_string()),
@@ -345,8 +344,12 @@ async fn login_submit(
         .await;
     };
 
-    let Some(user) = user::find_by_username(&state.db, username).await? else {
-        state.login_limiter.record_failure(&ip);
+    // The attempt was already counted by `try_acquire`. Unknown users still
+    // run one Argon2 verification so timing does not reveal valid usernames.
+    let user = user::find_by_username(&state.db, username).await?;
+    let password_hash = user.as_ref().map(|user| user.password_hash.clone());
+    let password_ok = check_login_password(form.password.clone(), password_hash).await;
+    let Some(user) = user.filter(|_| password_ok) else {
         return render_login(
             &state,
             Some("用户名或密码错误。".to_string()),
@@ -355,17 +358,6 @@ async fn login_submit(
         )
         .await;
     };
-
-    if !verify_password(&form.password, &user.password_hash) {
-        state.login_limiter.record_failure(&ip);
-        return render_login(
-            &state,
-            Some("用户名或密码错误。".to_string()),
-            next,
-            form.username,
-        )
-        .await;
-    }
 
     state.login_limiter.record_success(&ip);
     let (token, _) = create_session(
@@ -2381,7 +2373,12 @@ async fn password_submit(
     Form(form): Form<PasswordForm>,
 ) -> AppResult<Response> {
     verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
-    if !verify_password(&form.old_password, &session.user.password_hash) {
+    if !check_login_password(
+        form.old_password.clone(),
+        Some(session.user.password_hash.clone()),
+    )
+    .await
+    {
         return password_error(&state, &session, "原密码不正确").await;
     }
     if form.new_password.chars().count() < 8 {
@@ -2391,7 +2388,7 @@ async fn password_submit(
         return password_error(&state, &session, "两次输入的新密码不一致").await;
     }
 
-    let hash = hash_password(&form.new_password)?;
+    let hash = hash_password_async(form.new_password.clone()).await?;
     user::update_password(&state.db, session.user.id, &hash).await?;
     sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
         .bind(session.user.id)

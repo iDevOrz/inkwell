@@ -557,14 +557,13 @@ pub async fn comment(
 
     let ip = client_ip(&headers, peer, state.config.trust_proxy_headers);
     let rate_limit_key = format!("comment:{ip}");
-    if !state.login_limiter.allowed(&rate_limit_key) {
+    if !state.login_limiter.try_acquire(&rate_limit_key) {
         return Ok((
             StatusCode::TOO_MANY_REQUESTS,
             "评论提交过于频繁，请稍后再试。",
         )
             .into_response());
     }
-    state.login_limiter.record_attempt(&rate_limit_key);
 
     if site.comments_require_email
         && form

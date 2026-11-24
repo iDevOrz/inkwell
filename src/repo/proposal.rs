@@ -83,7 +83,7 @@ pub async fn create(pool: &SqlitePool, input: ProposalInput) -> AppResult<Conten
     };
 
     let now = now_ts();
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let result = sqlx::query(
         "INSERT INTO content_proposals(content_id, base_revision_id, base_updated_at, title, \
                 body, excerpt, summary, status, author, created_at) \
@@ -182,7 +182,7 @@ pub async fn update(
     excerpt: Option<String>,
     summary: Option<String>,
 ) -> AppResult<ContentProposal> {
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let current = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;
@@ -266,7 +266,7 @@ pub async fn apply(
     force: bool,
     can_publish: bool,
 ) -> AppResult<(ContentProposal, Content)> {
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let proposal = get_in_transaction(&mut transaction, id)
         .await?
         .ok_or_else(|| AppError::not_found("版本不存在"))?;

@@ -44,7 +44,7 @@ pub async fn create(pool: &SqlitePool, input: ContentInput) -> AppResult<i64> {
         .unwrap_or_else(|| markdown::excerpt(&input.body, 240));
     let allow_comments = input.allow_comments.unwrap_or(true) as i64;
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let result = sqlx::query(
         "INSERT INTO contents(kind, title, slug, body, excerpt, status, visibility, author_id, \
                 created_at, updated_at, published_at, review_status, review_notes, allow_comments, \
@@ -194,7 +194,7 @@ pub async fn update_with_publish_permission(
         .map(|value| value as i64)
         .unwrap_or(current.allow_comments);
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     let update = sqlx::query(
         "UPDATE contents SET title = ?, slug = ?, body = ?, excerpt = ?, status = ?, \
                 visibility = ?, updated_at = ?, published_at = ?, review_status = ?, \
@@ -484,7 +484,7 @@ pub async fn set_review(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     // The revision below snapshots `current`, so only write if it is still
     // the stored version.
     let result = sqlx::query(

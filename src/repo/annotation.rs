@@ -248,7 +248,7 @@ pub async fn reply(
         .ok_or_else(|| AppError::not_found("批注不存在"))?;
     let now = now_ts();
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     sqlx::query(
         "INSERT INTO annotation_replies(annotation_id, author, body, created_at) \
          VALUES(?, ?, ?, ?)",

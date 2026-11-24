@@ -148,7 +148,7 @@ pub async fn update(pool: &SqlitePool, settings: &SiteSettings) -> AppResult<()>
         ("feed_full_text", bool_value(settings.feed_full_text)),
     ];
 
-    let mut transaction = pool.begin().await?;
+    let mut transaction = crate::db::begin_write(pool).await?;
     for (name, value) in values {
         sqlx::query(
             "INSERT INTO settings(name, value) VALUES(?, ?) \

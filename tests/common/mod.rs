@@ -143,10 +143,24 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::build(|_| {}).await
+    }
+
+    /// Uses a WAL-mode database file with a real connection pool instead of
+    /// the single-connection in-memory database, so concurrent requests
+    /// actually overlap as they do in production.
+    pub async fn with_file_database() -> Self {
+        Self::build(|config| {
+            config.database_url = format!("sqlite://{}/inkwell.db", config.data_dir.display());
+        })
+        .await
+    }
+
+    async fn build(customize: impl FnOnce(&mut Config)) -> Self {
         let data_dir = tempfile::tempdir().expect("tempdir");
-        let state = app::build_state(test_config(data_dir.path()))
-            .await
-            .expect("build state");
+        let mut config = test_config(data_dir.path());
+        customize(&mut config);
+        let state = app::build_state(config).await.expect("build state");
         let pool = state.db.clone();
         let router =
             app::router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));

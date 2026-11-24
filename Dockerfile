@@ -1,4 +1,4 @@
-FROM rust:1-slim-bookworm AS builder
+FROM rust:1-slim-bookworm@sha256:7c7d4eb4d05b7781187a327809466cfddf29753f6defdc3d19a0e291951b7a37 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY static ./static
 
 RUN cargo build --release --locked
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \

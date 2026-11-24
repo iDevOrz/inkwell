@@ -23,7 +23,13 @@
       const response = await fetch(`/timeline/more?${params.toString()}`, {
         headers: { Accept: "text/html" },
       });
+      // A redirect means the server answered with some other page; never inject it.
+      if (response.redirected) throw new Error(`Unexpected redirect to ${response.url}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.startsWith("text/html")) {
+        throw new Error(`Unexpected content type: ${contentType || "none"}`);
+      }
 
       const html = await response.text();
       if (html.trim()) list.insertAdjacentHTML("beforeend", html);
@@ -42,6 +48,7 @@
         root.remove();
       }
     } catch (error) {
+      console.warn("Timeline load failed", error);
       if (link) link.textContent = "加载失败，点击重试";
     } finally {
       loading = false;

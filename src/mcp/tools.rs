@@ -230,7 +230,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "review_decide",
-            "Record a review verdict. Publishing requires the publish scope.",
+            "Record a review verdict. publish=true requires the publish scope and verdict approved; approval and publishing happen in one write.",
             json!({
                 "id": {"type": "integer"},
                 "verdict": {"type": "string", "enum": ["approved", "changes_requested"]},
@@ -280,7 +280,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "annotation_reply",
-            "Reply to an annotation and optionally change its status. Use addressed after applying the requested edit.",
+            "Reply to an annotation and optionally change its status. Use addressed after applying the requested edit; resolved requires the review scope.",
             json!({
                 "id": {"type": "integer"},
                 "body": {"type": "string"},
@@ -290,7 +290,7 @@ pub fn definitions() -> Value {
         ),
         tool(
             "annotation_resolve",
-            "Mark an annotation as resolved, optionally with a final note.",
+            "Mark an annotation as resolved, optionally with a final note. Requires the review scope.",
             json!({
                 "id": {"type": "integer"},
                 "note": {"type": "string"}
@@ -453,7 +453,7 @@ pub async fn call(
 
     match result {
         Ok(value) => ok(value),
-        Err(error) => tool_error(error.to_string()),
+        Err(error) => tool_error(error.message()),
     }
 }
 
@@ -635,7 +635,13 @@ async fn content_delete(
         if current.status == "published" {
             require(principal, "publish")?;
         }
-        let content = content::trash(&state.db, id, &principal.actor()).await?;
+        let content = content::trash_with_publish_permission(
+            &state.db,
+            id,
+            &principal.actor(),
+            principal.has("publish"),
+        )
+        .await?;
         Ok(json!({"id": content.id, "status": content.status, "permanent": false}))
     }
 }
@@ -874,6 +880,7 @@ async fn review_submit(
         "pending",
         notes.as_deref(),
         &principal.actor(),
+        principal.has("publish"),
     )
     .await?;
     Ok(json!({
@@ -897,27 +904,23 @@ async fn review_decide(
         ));
     }
     let publish = arg_bool(args, "publish").unwrap_or(false);
+    let notes = arg_str(args, "notes");
     if publish {
         require(principal, "publish")?;
-        let existing = content::get_by_id(&state.db, id)
-            .await?
-            .ok_or_else(|| AppError::not_found("内容不存在"))?;
-        if existing.kind == "note" {
-            return Err(AppError::bad_request("笔记请先 promote 为文章再发布"));
+        if verdict != "approved" {
+            return Err(AppError::bad_request("只有 approved 才能同时发布"));
         }
-    }
-    let notes = arg_str(args, "notes");
-    content::set_review(
-        &state.db,
-        id,
-        &verdict,
-        notes.as_deref(),
-        &principal.actor(),
-    )
-    .await?;
-
-    if publish {
-        content::publish(&state.db, id, &principal.actor()).await?;
+        content::approve_and_publish(&state.db, id, notes.as_deref(), &principal.actor()).await?;
+    } else {
+        content::set_review(
+            &state.db,
+            id,
+            &verdict,
+            notes.as_deref(),
+            &principal.actor(),
+            principal.has("publish"),
+        )
+        .await?;
     }
 
     let updated = content::get_by_id(&state.db, id)
@@ -1029,6 +1032,10 @@ async fn annotation_reply(
     {
         return Err(AppError::bad_request("非法的批注状态"));
     }
+    if status.as_deref() == Some("resolved") {
+        // Closing feedback is the author's decision; AI clients mark it addressed.
+        require(principal, "review")?;
+    }
     annotation::reply(&state.db, id, &principal.actor(), &body, status.as_deref()).await?;
     let item = annotation::get_with_replies(&state.db, id)
         .await?
@@ -1041,7 +1048,7 @@ async fn annotation_resolve(
     principal: &McpPrincipal,
     args: &Value,
 ) -> AppResult<Value> {
-    require(principal, "write")?;
+    require(principal, "review")?;
     let id = required_i64(args, "id")?;
     if let Some(note) = arg_str(args, "note").filter(|value| !value.trim().is_empty()) {
         annotation::reply(&state.db, id, &principal.actor(), &note, Some("resolved")).await?;

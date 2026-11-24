@@ -27,6 +27,26 @@ pub struct AuthSession {
     pub token_hash: String,
 }
 
+impl AuthSession {
+    /// Admins and editors may use the back office and see drafts/private content.
+    pub fn can_manage_content(&self) -> bool {
+        matches!(self.user.role.as_str(), "admin" | "editor")
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.user.role == "admin"
+    }
+
+    /// Site settings and MCP tokens grant control over the whole instance.
+    pub fn require_admin(&self) -> AppResult<()> {
+        if self.is_admin() {
+            Ok(())
+        } else {
+            Err(AppError::forbidden("只有管理员可以执行此操作"))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OptionalUser(pub Option<AuthSession>);
 
@@ -73,7 +93,7 @@ impl FromRequestParts<AppState> for AdminSession {
             return Err(AppError::Redirect(format!("/admin/login?next={next}")));
         };
 
-        if session.user.role != "admin" && session.user.role != "editor" {
+        if !session.can_manage_content() {
             return Err(AppError::Forbidden("当前账号没有后台权限".to_string()));
         }
 
@@ -295,7 +315,9 @@ pub fn append_cookie(headers: &mut HeaderMap, value: HeaderValue) {
 struct Attempt {
     failures: u32,
     blocked_until: Option<Instant>,
-    last_seen: Instant,
+    /// Attempts are counted per fixed window, so occasional legitimate use
+    /// (a reader leaving a comment now and then) never accumulates into a block.
+    window_start: Instant,
 }
 
 const LOGIN_ATTEMPT_TTL: Duration = Duration::from_secs(20 * 60);
@@ -326,7 +348,10 @@ impl LoginLimiter {
     /// work runs, so concurrent requests cannot all slip past the limit.
     /// Call `record_success` afterwards to clear the counter.
     pub fn try_acquire(&self, key: &str) -> bool {
-        let now = Instant::now();
+        self.try_acquire_at(key, Instant::now())
+    }
+
+    fn try_acquire_at(&self, key: &str, now: Instant) -> bool {
         let mut state = self.lock_and_clean(now);
         if !Self::allowed_locked(&mut state, key, now) {
             return false;
@@ -353,16 +378,22 @@ impl LoginLimiter {
 
     fn allowed_locked(state: &mut LoginLimiterState, key: &str, now: Instant) -> bool {
         if let Some(attempt) = state.attempts.get_mut(key) {
-            attempt.last_seen = now;
             if let Some(until) = attempt.blocked_until {
                 if until > now {
                     return false;
                 }
-                attempt.failures = 0;
                 attempt.blocked_until = None;
+                Self::reset_window(attempt, now);
+            } else if now.duration_since(attempt.window_start) >= LOGIN_ATTEMPT_TTL {
+                Self::reset_window(attempt, now);
             }
         }
         true
+    }
+
+    fn reset_window(attempt: &mut Attempt, now: Instant) {
+        attempt.failures = 0;
+        attempt.window_start = now;
     }
 
     fn record_attempt_locked(state: &mut LoginLimiterState, key: &str, now: Instant) {
@@ -388,9 +419,8 @@ impl LoginLimiter {
         let entry = state.attempts.entry(key.to_string()).or_insert(Attempt {
             failures: 0,
             blocked_until: None,
-            last_seen: now,
+            window_start: now,
         });
-        entry.last_seen = now;
         entry.failures += 1;
         if entry.failures >= MAX_LOGIN_ATTEMPTS {
             entry.blocked_until = Some(now + LOGIN_BLOCK_DURATION);
@@ -418,7 +448,7 @@ impl LoginLimiter {
             attempt
                 .blocked_until
                 .map(|until| until > now)
-                .unwrap_or_else(|| now.duration_since(attempt.last_seen) < LOGIN_ATTEMPT_TTL)
+                .unwrap_or_else(|| now.duration_since(attempt.window_start) < LOGIN_ATTEMPT_TTL)
         });
         state.last_cleanup = Some(now);
     }
@@ -456,6 +486,20 @@ mod tests {
             assert!(limiter.try_acquire(key));
         }
         assert!(!limiter.try_acquire(key));
+    }
+
+    #[test]
+    fn attempts_expire_after_the_window() {
+        let limiter = LoginLimiter::default();
+        let key = "comment:127.0.0.1";
+        let start = Instant::now();
+        for _ in 0..4 {
+            assert!(limiter.try_acquire_at(key, start));
+        }
+        let later = start + LOGIN_ATTEMPT_TTL + Duration::from_secs(1);
+        for _ in 0..4 {
+            assert!(limiter.try_acquire_at(key, later));
+        }
     }
 
     #[test]

@@ -19,7 +19,7 @@ Inkwell 的 AI 写作流程以“批注 + 待审版本”为中心。AI 不会�
 - **划词批注**：保存选区文本及前后文锚点，便于在原文预览中定位。
 - **整体评价**：针对整篇文章提出结构、语气或方向性要求。
 
-批注状态包括 open、addressed、resolved 和 outdated。AI 回复后可标记 addressed；作者确认后再 resolve。
+批注状态包括 open、addressed、resolved 和 outdated。AI 回复后可标记 addressed；作者确认后再 resolve。通过 MCP 关闭批注需要 `review` scope，只有 `write` 的 AI token 只能标记 addressed。AI 回复时如果不带状态，会保留作者当时设置的状态，不会把已 resolve 的批注重新打开。
 
 文章内容后来发生变化时，划词锚点可能无法精确匹配。遇到这种情况，应结合保存的原文引用和前后文人工核对，而不是盲目替换。
 

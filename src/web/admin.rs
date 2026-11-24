@@ -862,7 +862,7 @@ async fn content_create(
                 None,
                 form_view,
                 None,
-                Some(error.to_string()),
+                Some(error.message()),
             )
             .await
         }
@@ -941,7 +941,7 @@ async fn content_update(
                 Some(view),
                 form_from_submission(&form, kind),
                 None,
-                Some(error.to_string()),
+                Some(error.message()),
             )
             .await
         }
@@ -1103,11 +1103,21 @@ async fn review_submit(
         return Err(AppError::bad_request("非法的 review 结论"));
     }
     let actor = format!("human:{}", session.user.id);
-    let content =
-        content::set_review(&state.db, id, &form.verdict, form.notes.as_deref(), &actor).await?;
-
-    if form.publish.is_some() && form.verdict == "approved" && content.kind != "note" {
-        content::publish(&state.db, id, &actor).await?;
+    let current = content::get_by_id(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("内容不存在"))?;
+    if form.publish.is_some() && form.verdict == "approved" && current.kind != "note" {
+        content::approve_and_publish(&state.db, id, form.notes.as_deref(), &actor).await?;
+    } else {
+        content::set_review(
+            &state.db,
+            id,
+            &form.verdict,
+            form.notes.as_deref(),
+            &actor,
+            true,
+        )
+        .await?;
     }
 
     Ok(Redirect::to("/admin/review?notice=review_saved").into_response())
@@ -1430,7 +1440,7 @@ async fn proposal_diff(
         return Err(AppError::not_found("版本不存在"));
     }
     let lines = build_diff(&item.content.body, &proposal.body);
-    let html = content::render_body(&state.db, id, &proposal.body, true).await?;
+    let html = content::render_body(&state.db, &proposal.body, true).await?;
     let proposal_view = proposal_view(&proposal, site.timezone_offset);
 
     let ctx = admin_ctx(
@@ -1769,7 +1779,7 @@ async fn term_create(
                 .into_response(),
         ),
         Err(error) => {
-            let ctx = admin_ctx(&state, &session, "terms", None, Some(error.to_string())).await?;
+            let ctx = admin_ctx(&state, &session, "terms", None, Some(error.message())).await?;
             let terms = term::list(&state.db, &form.kind).await?;
             Ok(render(TermsTemplate {
                 ctx,
@@ -1780,7 +1790,7 @@ async fn term_create(
                     "标签".to_string()
                 },
                 terms,
-                error: Some(error.to_string()),
+                error: Some(error.message()),
             })?
             .into_response())
         }
@@ -1807,6 +1817,7 @@ async fn settings_page(
     AdminSession(session): AdminSession,
     Query(query): Query<AdminListQuery>,
 ) -> AppResult<Response> {
+    session.require_admin()?;
     let ctx = admin_ctx(
         &state,
         &session,
@@ -1829,6 +1840,7 @@ async fn settings_submit(
     AdminSession(session): AdminSession,
     Form(form): Form<SettingsForm>,
 ) -> AppResult<Response> {
+    session.require_admin()?;
     verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
     let page_size = form
         .page_size
@@ -2048,7 +2060,7 @@ async fn media_upload(
     };
 
     if let Err(error) = store_upload(&state, &session, original_name, declared_mime, bytes).await {
-        return media_response(&state, &session, None, Some(error.to_string())).await;
+        return media_response(&state, &session, None, Some(error.message())).await;
     }
 
     Ok(Redirect::to("/admin/media?notice=uploaded").into_response())
@@ -2064,7 +2076,10 @@ async fn vditor_preview(
     OptionalUser(session): OptionalUser,
     Json(request): Json<VditorPreviewRequest>,
 ) -> Response {
-    if session.is_none() {
+    if !session
+        .as_ref()
+        .is_some_and(AuthSession::can_manage_content)
+    {
         return Json(json!({
             "code": 1,
             "msg": "登录已过期，请刷新页面",
@@ -2088,7 +2103,7 @@ async fn vditor_upload(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
-    let Some(session) = session else {
+    let Some(session) = session.filter(AuthSession::can_manage_content) else {
         return Json(json!({
             "code": 1,
             "msg": "登录已过期，请刷新页面",
@@ -2148,7 +2163,7 @@ async fn vditor_upload(
     if let Err(error) = verify_csrf(&session, csrf.as_deref().unwrap_or("")) {
         return Json(json!({
             "code": 1,
-            "msg": error.to_string(),
+            "msg": error.message(),
             "data": { "errFiles": [], "succMap": {} }
         }))
         .into_response();
@@ -2182,7 +2197,7 @@ async fn vditor_upload(
             }
             Err(error) => {
                 if first_error.is_empty() {
-                    first_error = error.to_string();
+                    first_error = error.message();
                 }
                 err_files.push(original_name);
             }
@@ -2223,6 +2238,7 @@ async fn tokens_page(
     AdminSession(session): AdminSession,
     Query(query): Query<AdminListQuery>,
 ) -> AppResult<Response> {
+    session.require_admin()?;
     tokens_response(
         &state,
         &session,
@@ -2281,6 +2297,7 @@ async fn token_create(
     AdminSession(session): AdminSession,
     Form(form): Form<TokenForm>,
 ) -> AppResult<Response> {
+    session.require_admin()?;
     verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
     let mut scopes = Vec::new();
     if form.scope_read.is_some() {
@@ -2317,7 +2334,7 @@ async fn token_create(
                 &state,
                 &session,
                 None,
-                Some(error.to_string()),
+                Some(error.message()),
                 None,
                 &["read", "write", "review"],
             )
@@ -2332,6 +2349,7 @@ async fn token_revoke(
     Path(id): Path<i64>,
     Form(form): Form<ActionForm>,
 ) -> AppResult<Response> {
+    session.require_admin()?;
     verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
     token::revoke(&state.db, id).await?;
     Ok(Redirect::to("/admin/tokens?notice=token_revoked").into_response())

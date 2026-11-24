@@ -249,19 +249,26 @@ pub async fn moderate(pool: &SqlitePool, id: i64, status: &str) -> AppResult<()>
     if !COMMENT_STATUSES.contains(&status) {
         return Err(AppError::bad_request("非法的评论状态"));
     }
-    sqlx::query("UPDATE comments SET status = ? WHERE id = ?")
+    let result = sqlx::query("UPDATE comments SET status = ? WHERE id = ?")
         .bind(status)
         .bind(id)
         .execute(pool)
         .await?;
-    Ok(())
+    ensure_comment_affected(result.rows_affected())
 }
 
 pub async fn delete(pool: &SqlitePool, id: i64) -> AppResult<()> {
-    sqlx::query("DELETE FROM comments WHERE id = ?")
+    let result = sqlx::query("DELETE FROM comments WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await?;
+    ensure_comment_affected(result.rows_affected())
+}
+
+fn ensure_comment_affected(rows: u64) -> AppResult<()> {
+    if rows == 0 {
+        return Err(AppError::not_found("评论不存在"));
+    }
     Ok(())
 }
 

@@ -320,13 +320,15 @@ pub async fn get_by_slug(pool: &SqlitePool, slug: &str) -> AppResult<Option<Cont
 }
 
 /// Render a proposed body with the same wiki-link resolution as the live view.
-pub async fn render_body(
-    pool: &SqlitePool,
-    content_id: i64,
-    body: &str,
-    for_admin: bool,
-) -> AppResult<String> {
-    let wiki = build_wiki_map(pool, content_id, for_admin).await?;
+pub async fn render_body(pool: &SqlitePool, body: &str, for_admin: bool) -> AppResult<String> {
+    // Resolve the proposal's own [[links]] (not the live body's links table),
+    // so the preview matches what applying the proposal will render.
+    let mut links = Vec::new();
+    for title in markdown::wiki_titles(body) {
+        let target_id = resolve_note_id(pool, &title).await?;
+        links.push((title, target_id));
+    }
+    let wiki = wiki_map_for_links(pool, links, for_admin).await?;
     Ok(markdown::render_markdown(body, &wiki))
 }
 
@@ -451,13 +453,15 @@ async fn outgoing_links(pool: &SqlitePool, source_id: i64) -> AppResult<Vec<Link
         target_id: Option<i64>,
         target_kind: Option<String>,
         target_slug: Option<String>,
-        target_promoted_to_id: Option<i64>,
+        promoted_slug: Option<String>,
     }
 
     let rows = sqlx::query_as::<_, Row>(
         "SELECT l.target_title, l.target_id, c.kind AS target_kind, c.slug AS target_slug, \
-                c.promoted_to_id AS target_promoted_to_id \
-         FROM links l LEFT JOIN contents c ON c.id = l.target_id \
+                p.slug AS promoted_slug \
+         FROM links l \
+         LEFT JOIN contents c ON c.id = l.target_id \
+         LEFT JOIN contents p ON p.id = c.promoted_to_id \
          WHERE l.source_id = ? ORDER BY l.target_title COLLATE NOCASE",
     )
     .bind(source_id)
@@ -466,10 +470,6 @@ async fn outgoing_links(pool: &SqlitePool, source_id: i64) -> AppResult<Vec<Link
 
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
-        let promoted_slug = match row.target_promoted_to_id {
-            Some(id) => get_by_id(pool, id).await?.map(|content| content.slug),
-            None => None,
-        };
         let target_admin_url = row.target_id.map(|id| {
             format!(
                 "/admin/{}/{}/edit",
@@ -483,7 +483,7 @@ async fn outgoing_links(pool: &SqlitePool, source_id: i64) -> AppResult<Vec<Link
             target_kind: row.target_kind,
             target_slug: row.target_slug,
             target_admin_url,
-            promoted_slug,
+            promoted_slug: row.promoted_slug,
         });
     }
     Ok(result)
@@ -494,68 +494,73 @@ async fn build_wiki_map(
     source_id: i64,
     for_admin: bool,
 ) -> AppResult<HashMap<String, WikiTarget>> {
-    #[derive(sqlx::FromRow)]
-    struct LinkRow {
-        target_title: String,
-        target_id: Option<i64>,
-    }
+    let links: Vec<(String, Option<i64>)> =
+        sqlx::query_as("SELECT target_title, target_id FROM links WHERE source_id = ?")
+            .bind(source_id)
+            .fetch_all(pool)
+            .await?;
+    wiki_map_for_links(pool, links, for_admin).await
+}
 
-    let rows = sqlx::query_as::<_, LinkRow>(
-        "SELECT target_title, target_id FROM links WHERE source_id = ?",
-    )
-    .bind(source_id)
-    .fetch_all(pool)
-    .await?;
-
-    let target_ids: Vec<i64> = rows.iter().filter_map(|row| row.target_id).collect();
+async fn wiki_map_for_links(
+    pool: &SqlitePool,
+    links: Vec<(String, Option<i64>)>,
+    for_admin: bool,
+) -> AppResult<HashMap<String, WikiTarget>> {
+    let target_ids: Vec<i64> = links.iter().filter_map(|(_, id)| *id).collect();
     let targets = load_by_ids(pool, &target_ids).await?;
-    let mut map = HashMap::new();
+    let promoted_ids: Vec<i64> = targets
+        .values()
+        .filter_map(|target| target.promoted_to_id)
+        .collect();
+    let promoted = load_by_ids(pool, &promoted_ids).await?;
 
-    for row in rows {
-        let target = row.target_id.and_then(|id| targets.get(&id));
-        let href = match target {
-            Some(target) => target_href(pool, target, for_admin).await?,
-            None => None,
-        };
-        let label = target
-            .map(|target| target.title.clone())
-            .unwrap_or_else(|| row.target_title.clone());
-        let wiki = WikiTarget { label, href };
-        map.insert(row.target_title.clone(), wiki.clone());
-        map.insert(row.target_title.to_lowercase(), wiki);
+    let resolved: Vec<(String, WikiTarget)> = links
+        .into_iter()
+        .map(|(title, target_id)| {
+            let target = target_id.and_then(|id| targets.get(&id));
+            let wiki = WikiTarget {
+                label: target.map_or_else(|| title.clone(), |target| target.title.clone()),
+                href: target.and_then(|target| target_href(target, &promoted, for_admin)),
+            };
+            (title, wiki)
+        })
+        .collect();
+
+    // Exact titles win over the case-insensitive fallback keys, so [[Rust]]
+    // and [[rust]] in one body each resolve to their own target.
+    let mut map: HashMap<String, WikiTarget> = resolved.iter().cloned().collect();
+    for (title, wiki) in resolved {
+        map.entry(title.to_lowercase()).or_insert(wiki);
     }
-
     Ok(map)
 }
 
-async fn target_href(
-    pool: &SqlitePool,
+fn target_href(
     target: &Content,
+    promoted: &HashMap<i64, Content>,
     for_admin: bool,
-) -> AppResult<Option<String>> {
+) -> Option<String> {
     if for_admin {
-        return Ok(Some(format!(
+        return Some(format!(
             "/admin/{}/{}/edit",
             crate::models::kind_to_path(&target.kind),
             target.id
-        )));
+        ));
     }
 
     if target.is_public() {
-        return Ok(Some(match target.kind.as_str() {
+        return Some(match target.kind.as_str() {
             "page" => format!("/pages/{}", target.slug),
             _ => format!("/archives/{}", target.slug),
-        }));
+        });
     }
 
-    if let Some(post_id) = target.promoted_to_id
-        && let Some(post) = get_by_id(pool, post_id).await?
-        && post.is_public()
-    {
-        return Ok(Some(format!("/archives/{}", post.slug)));
-    }
-
-    Ok(None)
+    target
+        .promoted_to_id
+        .and_then(|post_id| promoted.get(&post_id))
+        .filter(|post| post.is_public())
+        .map(|post| format!("/archives/{}", post.slug))
 }
 
 async fn author_name(pool: &SqlitePool, author_id: i64) -> AppResult<String> {
@@ -869,7 +874,16 @@ pub async fn update_with_publish_permission(
     .bind(current.updated_at)
     .bind(can_publish)
     .execute(&mut *transaction)
-    .await?;
+    .await;
+    // `unique_slug` runs outside the transaction, so a concurrent writer can
+    // still claim the same slug; report that as a conflict, not a 500.
+    let update = match update {
+        Ok(result) => result,
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            return Err(AppError::conflict("缩略名已被使用，请换一个"));
+        }
+        Err(error) => return Err(error.into()),
+    };
     if update.rows_affected() != 1 {
         return Err(AppError::conflict("内容已被其他人修改，请重新读取后再提交"));
     }
@@ -994,12 +1008,7 @@ pub async fn publish(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Conte
     let current = get_by_id(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
-    if current.kind == "note" {
-        return Err(AppError::bad_request("笔记请使用 promote 转为文章"));
-    }
-    if current.status == "trash" || current.deleted_at.is_some() {
-        return Err(AppError::bad_request("回收站中的内容不能直接发布"));
-    }
+    ensure_publishable(&current)?;
 
     update(
         pool,
@@ -1015,8 +1024,58 @@ pub async fn publish(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Conte
     .await
 }
 
-pub async fn trash(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Content> {
+/// Approves and publishes in a single guarded write, so a failed publish never
+/// leaves the review status changed on its own.
+pub async fn approve_and_publish(
+    pool: &SqlitePool,
+    id: i64,
+    review_notes: Option<&str>,
+    actor: &str,
+) -> AppResult<Content> {
+    let current = get_by_id(pool, id)
+        .await?
+        .ok_or_else(|| AppError::not_found("内容不存在"))?;
+    ensure_publishable(&current)?;
     update(
+        pool,
+        id,
+        ContentPatch {
+            status: Some("published".to_string()),
+            review_status: Some("approved".to_string()),
+            // An empty string clears stale notes, matching `set_review`.
+            review_notes: Some(review_notes.unwrap_or_default().to_string()),
+            expected_updated_at: Some(current.updated_at),
+            actor: actor.to_string(),
+            revision_note: Some("review: approved，发布".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+fn ensure_publishable(content: &Content) -> AppResult<()> {
+    if content.kind == "note" {
+        return Err(AppError::bad_request("笔记请使用 promote 转为文章"));
+    }
+    if content.status == "trash" || content.deleted_at.is_some() {
+        return Err(AppError::bad_request("回收站中的内容不能直接发布"));
+    }
+    Ok(())
+}
+
+pub async fn trash(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Content> {
+    trash_with_publish_permission(pool, id, actor, true).await
+}
+
+/// Moves content to the trash. Without `can_publish`, published content is
+/// refused inside the guarded UPDATE, so a concurrent publish cannot slip by.
+pub async fn trash_with_publish_permission(
+    pool: &SqlitePool,
+    id: i64,
+    actor: &str,
+    can_publish: bool,
+) -> AppResult<Content> {
+    update_with_publish_permission(
         pool,
         id,
         ContentPatch {
@@ -1025,6 +1084,7 @@ pub async fn trash(pool: &SqlitePool, id: i64, actor: &str) -> AppResult<Content
             revision_note: Some("移入回收站".to_string()),
             ..Default::default()
         },
+        can_publish,
     )
     .await
 }
@@ -1065,6 +1125,7 @@ pub async fn set_review(
     review_status: &str,
     review_notes: Option<&str>,
     actor: &str,
+    can_publish: bool,
 ) -> AppResult<Content> {
     if !REVIEW_STATUSES.contains(&review_status) {
         return Err(AppError::bad_request("非法的 review 状态"));
@@ -1072,21 +1133,32 @@ pub async fn set_review(
     let current = get_by_id(pool, id)
         .await?
         .ok_or_else(|| AppError::not_found("内容不存在"))?;
+    if current.status == "published" && !can_publish {
+        return Err(AppError::forbidden("修改已发布文章需要 publish 权限"));
+    }
     let now = now_ts().max(current.updated_at.saturating_add(1));
     let notes = review_notes
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
     let mut transaction = pool.begin().await?;
-    sqlx::query(
-        "UPDATE contents SET review_status = ?, review_notes = ?, updated_at = ? WHERE id = ?",
+    // The revision below snapshots `current`, so only write if it is still
+    // the stored version.
+    let result = sqlx::query(
+        "UPDATE contents SET review_status = ?, review_notes = ?, updated_at = ? \
+         WHERE id = ? AND updated_at = ? AND (? OR status != 'published')",
     )
     .bind(review_status)
     .bind(notes)
     .bind(now)
     .bind(id)
+    .bind(current.updated_at)
+    .bind(can_publish)
     .execute(&mut *transaction)
     .await?;
+    if result.rows_affected() != 1 {
+        return Err(AppError::conflict("内容已被其他人修改，请重新读取后再提交"));
+    }
     revision::insert_tx(
         &mut transaction,
         id,
@@ -1280,15 +1352,7 @@ async fn sync_links_tx(
         .await?;
 
     for title in markdown::wiki_titles(body) {
-        let target_id: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM contents WHERE kind = 'note' AND deleted_at IS NULL \
-             AND (title = ? COLLATE NOCASE OR slug = ? COLLATE NOCASE) \
-             ORDER BY updated_at DESC LIMIT 1",
-        )
-        .bind(&title)
-        .bind(&title)
-        .fetch_optional(&mut **transaction)
-        .await?;
+        let target_id = resolve_note_id(&mut **transaction, &title).await?;
 
         sqlx::query(
             "INSERT OR REPLACE INTO links(source_id, target_title, target_id) VALUES(?, ?, ?)",
@@ -1311,6 +1375,22 @@ async fn sync_links_tx(
     }
 
     Ok(())
+}
+
+/// The note a `[[title]]` points to: matched by title or slug, newest first.
+async fn resolve_note_id<'e, E>(executor: E, title: &str) -> AppResult<Option<i64>>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    Ok(sqlx::query_scalar(
+        "SELECT id FROM contents WHERE kind = 'note' AND deleted_at IS NULL \
+         AND (title = ? COLLATE NOCASE OR slug = ? COLLATE NOCASE) \
+         ORDER BY updated_at DESC LIMIT 1",
+    )
+    .bind(title)
+    .bind(title)
+    .fetch_optional(executor)
+    .await?)
 }
 
 pub(super) async fn resolve_pending_links(

@@ -9,13 +9,14 @@ use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-use crate::auth::OptionalUser;
+use crate::auth::{AuthSession, OptionalUser};
 use crate::error::{AppError, AppResult};
-use crate::models::{Pagination, TimelinePost};
+use crate::models::{Content, Pagination, TimelinePost};
 use crate::repo::{comment, content, media, term};
 use crate::state::AppState;
 use crate::util::{
-    client_ip, format_date, format_iso, format_month, now_ts, timezone, user_agent, xml_escape,
+    client_ip, format_date, format_iso, format_month, now_ts, path_segment, timezone, user_agent,
+    xml_escape,
 };
 
 use super::templates::{
@@ -418,6 +419,11 @@ pub async fn archive(
     Ok(render(template)?.into_response())
 }
 
+/// Drafts and private content are visible only to back-office roles.
+fn can_view(content: &Content, session: Option<&AuthSession>) -> bool {
+    content.is_public() || session.is_some_and(AuthSession::can_manage_content)
+}
+
 pub async fn post(
     State(state): State<AppState>,
     OptionalUser(session): OptionalUser,
@@ -428,7 +434,7 @@ pub async fn post(
     let Some(content_row) = content::get_by_slug(&state.db, &slug).await? else {
         return not_found_page(&state, session.as_ref(), &format!("/archives/{slug}")).await;
     };
-    if content_row.kind != "post" || (!content_row.is_public() && session.is_none()) {
+    if content_row.kind != "post" || !can_view(&content_row, session.as_ref()) {
         return not_found_page(&state, session.as_ref(), &format!("/archives/{slug}")).await;
     }
 
@@ -445,7 +451,9 @@ pub async fn post(
         &state.db,
         content_row.id,
         site.timezone_offset,
-        session.is_some(),
+        session
+            .as_ref()
+            .is_some_and(AuthSession::can_manage_content),
     )
     .await?;
 
@@ -498,7 +506,7 @@ pub async fn page(
     let Some(content_row) = content::get_by_slug(&state.db, &slug).await? else {
         return not_found_page(&state, session.as_ref(), &format!("/pages/{slug}")).await;
     };
-    if content_row.kind != "page" || (!content_row.is_public() && session.is_none()) {
+    if content_row.kind != "page" || !can_view(&content_row, session.as_ref()) {
         return not_found_page(&state, session.as_ref(), &format!("/pages/{slug}")).await;
     }
 
@@ -515,7 +523,9 @@ pub async fn page(
         &state.db,
         content_row.id,
         site.timezone_offset,
-        session.is_some(),
+        session
+            .as_ref()
+            .is_some_and(AuthSession::can_manage_content),
     )
     .await?;
     let template = PageTemplate {
@@ -557,7 +567,7 @@ pub async fn comment(
 
     let ip = client_ip(&headers, peer, state.config.trust_proxy_headers);
     let rate_limit_key = format!("comment:{ip}");
-    if !state.login_limiter.try_acquire(&rate_limit_key) {
+    if !state.comment_limiter.try_acquire(&rate_limit_key) {
         return Ok((
             StatusCode::TOO_MANY_REQUESTS,
             "评论提交过于频繁，请稍后再试。",
@@ -658,7 +668,11 @@ pub async fn feed_rss(State(state): State<AppState>) -> AppResult<Response> {
         } else {
             view.excerpt_text
         };
-        let link = format!("{}/archives/{}", site.site_url, post.content.slug);
+        let link = format!(
+            "{}/archives/{}",
+            site.site_url,
+            path_segment(&post.content.slug)
+        );
         let published = post.content.published_at.unwrap_or(post.content.created_at);
         items.push_str(&format!(
             "<item><title>{}</title><link>{}</link><guid isPermaLink=\"true\">{}</guid>\
@@ -709,7 +723,11 @@ pub async fn feed_atom(State(state): State<AppState>) -> AppResult<Response> {
         } else {
             view.excerpt_text
         };
-        let link = format!("{}/archives/{}", site.site_url, post.content.slug);
+        let link = format!(
+            "{}/archives/{}",
+            site.site_url,
+            path_segment(&post.content.slug)
+        );
         let published = post.content.published_at.unwrap_or(post.content.created_at);
         entries.push_str(&format!(
             "<entry><title>{}</title><id>{}</id><link href=\"{}\"/>\
@@ -766,7 +784,7 @@ pub async fn sitemap(State(state): State<AppState>) -> AppResult<Response> {
         urls.push(format!(
             "<url><loc>{}/archives/{}</loc><lastmod>{}</lastmod></url>",
             xml_escape(&site.site_url),
-            xml_escape(&post.content.slug),
+            xml_escape(&path_segment(&post.content.slug)),
             format_iso(post.content.updated_at, site.timezone_offset)
         ));
     }
@@ -786,7 +804,7 @@ pub async fn sitemap(State(state): State<AppState>) -> AppResult<Response> {
         urls.push(format!(
             "<url><loc>{}/pages/{}</loc><lastmod>{}</lastmod></url>",
             xml_escape(&site.site_url),
-            xml_escape(&page.content.slug),
+            xml_escape(&path_segment(&page.content.slug)),
             format_iso(page.content.updated_at, site.timezone_offset)
         ));
     }
@@ -795,14 +813,14 @@ pub async fn sitemap(State(state): State<AppState>) -> AppResult<Response> {
         urls.push(format!(
             "<url><loc>{}/categories/{}</loc></url>",
             xml_escape(&site.site_url),
-            xml_escape(&term.term.slug)
+            xml_escape(&path_segment(&term.term.slug))
         ));
     }
     for term in term::list_public(&state.db, "tag").await? {
         urls.push(format!(
             "<url><loc>{}/tags/{}</loc></url>",
             xml_escape(&site.site_url),
-            xml_escape(&term.term.slug)
+            xml_escape(&path_segment(&term.term.slug))
         ));
     }
 
@@ -832,7 +850,7 @@ pub async fn media(
     let publicly_referenced = media::is_publicly_referenced(&state.db, key).await?;
     let can_view_private = session
         .as_ref()
-        .is_some_and(|session| matches!(session.user.role.as_str(), "admin" | "editor"));
+        .is_some_and(AuthSession::can_manage_content);
     if !publicly_referenced && !can_view_private {
         return Ok((
             StatusCode::NOT_FOUND,

@@ -40,8 +40,28 @@ pub fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Escapes text for XML and drops characters XML 1.0 forbids (most C0
+/// controls, U+FFFE/U+FFFF); a single one would make a whole feed unparsable.
 pub fn xml_escape(value: &str) -> String {
-    html_escape(value)
+    let allowed: String = value.chars().filter(|ch| is_xml_char(*ch)).collect();
+    html_escape(&allowed)
+}
+
+fn is_xml_char(ch: char) -> bool {
+    matches!(ch, '\t' | '\n' | '\r') || (ch >= ' ' && ch != '\u{FFFE}' && ch != '\u{FFFF}')
+}
+
+/// Characters left as-is in a URL path segment (RFC 3986 unreserved).
+const PATH_SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// Percent-encodes a slug for use in absolute URLs such as sitemap `<loc>`,
+/// which must be valid URIs (Chinese slugs are otherwise emitted raw).
+pub fn path_segment(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, PATH_SEGMENT).to_string()
 }
 
 pub fn timezone(offset_minutes: i32) -> FixedOffset {
@@ -213,6 +233,19 @@ mod tests {
     #[test]
     fn escapes_html() {
         assert_eq!(html_escape("<script>"), "&lt;script&gt;");
+    }
+
+    #[test]
+    fn xml_escape_drops_characters_invalid_in_xml() {
+        assert_eq!(xml_escape("a\u{0B}b\u{0C}c\u{FFFF}<"), "abc&lt;");
+        assert_eq!(xml_escape("tab\tline\n"), "tab\tline\n");
+    }
+
+    #[test]
+    fn path_segment_encodes_non_ascii_and_reserved() {
+        assert_eq!(path_segment("rust-笔记"), "rust-%E7%AC%94%E8%AE%B0");
+        assert_eq!(path_segment("a b/c?d"), "a%20b%2Fc%3Fd");
+        assert_eq!(path_segment("ok-1_2.3~"), "ok-1_2.3~");
     }
 
     #[test]

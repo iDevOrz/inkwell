@@ -2,7 +2,12 @@ use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+
+use crate::repo::token::SCOPES;
+
+const DEFAULT_SESSION_DAYS: i64 = 14;
+const MAX_SESSION_DAYS: i64 = 365;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -49,12 +54,9 @@ impl Config {
 
         let mcp_token = env::var("MCP_TOKEN").ok().filter(|value| !value.is_empty());
 
-        let mcp_token_scopes = env::var("MCP_TOKEN_SCOPES")
-            .unwrap_or_else(|_| "read,write,review".to_string())
-            .split(',')
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect();
+        let mcp_token_scopes = parse_scopes(
+            &env::var("MCP_TOKEN_SCOPES").unwrap_or_else(|_| "read,write,review".to_string()),
+        )?;
 
         let secure_cookies = env::var("COOKIE_SECURE")
             .ok()
@@ -66,10 +68,7 @@ impl Config {
             .map(|value| parse_bool(&value))
             .unwrap_or(false);
 
-        let session_days = env::var("SESSION_DAYS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(14);
+        let session_days = parse_session_days(env::var("SESSION_DAYS").ok().as_deref())?;
 
         let max_upload_bytes = env::var("MAX_UPLOAD_BYTES")
             .ok()
@@ -97,9 +96,65 @@ impl Config {
     }
 }
 
+/// Rejects unknown scopes so a typo fails at startup instead of silently
+/// producing a token without the intended permissions.
+fn parse_scopes(value: &str) -> Result<Vec<String>> {
+    let scopes: Vec<String> = value
+        .split(',')
+        .map(|scope| scope.trim().to_string())
+        .filter(|scope| !scope.is_empty())
+        .collect();
+    if let Some(unknown) = scopes
+        .iter()
+        .find(|scope| !SCOPES.contains(&scope.as_str()))
+    {
+        bail!(
+            "MCP_TOKEN_SCOPES contains unknown scope `{unknown}`; allowed: {}",
+            SCOPES.join(",")
+        );
+    }
+    Ok(scopes)
+}
+
+/// The same value feeds the session row and the cookie Max-Age, so keep it in
+/// a range where both are valid (0 or negative would expire the cookie at once).
+fn parse_session_days(value: Option<&str>) -> Result<i64> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(DEFAULT_SESSION_DAYS);
+    };
+    match value.parse::<i64>() {
+        Ok(days) if (1..=MAX_SESSION_DAYS).contains(&days) => Ok(days),
+        _ => bail!("SESSION_DAYS must be an integer between 1 and {MAX_SESSION_DAYS}"),
+    }
+}
+
 fn parse_bool(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_mcp_scope_is_rejected() {
+        assert!(parse_scopes("read,wirte").is_err());
+        assert_eq!(
+            parse_scopes(" read, write ,").unwrap(),
+            vec!["read", "write"]
+        );
+    }
+
+    #[test]
+    fn session_days_must_be_in_range() {
+        assert_eq!(parse_session_days(None).unwrap(), DEFAULT_SESSION_DAYS);
+        assert_eq!(parse_session_days(Some("30")).unwrap(), 30);
+        assert!(parse_session_days(Some("0")).is_err());
+        assert!(parse_session_days(Some("-1")).is_err());
+        assert!(parse_session_days(Some("100000000000")).is_err());
+        assert!(parse_session_days(Some("abc")).is_err());
+    }
 }

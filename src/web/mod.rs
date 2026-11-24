@@ -147,7 +147,7 @@ async fn security_headers(request: Request<Body>, next: Next) -> Response {
             "default-src 'self'; \
              img-src 'self' data: https:; \
              style-src 'self' 'unsafe-inline'; \
-             script-src 'self' 'sha256-qR4U4J3Ne5n0m3uNzGMB/tZ3TWJUf89OlxdXqjqALDM='; \
+             script-src 'self'; \
              frame-ancestors 'none'; \
              base-uri 'self'; \
              form-action 'self'",

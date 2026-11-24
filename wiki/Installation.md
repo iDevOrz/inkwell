@@ -56,10 +56,10 @@ TRUST_PROXY_HEADERS=true
 | `ADMIN_USER` | `admin` | 首次启动创建的用户名 |
 | `ADMIN_PASSWORD` | 随机生成 | 首次启动的管理员密码 |
 | `MCP_TOKEN` | 空 | 可选的部署级 HTTP MCP token |
-| `MCP_TOKEN_SCOPES` | `read,write,review` | 部署级 MCP token 权限 |
+| `MCP_TOKEN_SCOPES` | `read,write,review` | 部署级 MCP token 权限；可选 read、write、publish、review、admin，写错会导致启动失败 |
 | `COOKIE_SECURE` | 根据 `SITE_URL` 自动判断 | 强制 Secure Cookie |
 | `TRUST_PROXY_HEADERS` | `false` | 是否信任反向代理 IP 头 |
-| `SESSION_DAYS` | `14` | 登录有效期 |
+| `SESSION_DAYS` | `14` | 登录有效期（天），取值 1–365 |
 | `MAX_UPLOAD_BYTES` | `10485760` | 单个上传文件的大小上限 |
 | `RUST_LOG` | `inkwell=info,tower_http=info` | 日志级别 |
 

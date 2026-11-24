@@ -41,12 +41,15 @@ Token 可通过 `MCP_TOKEN` 设置，也可在后台 `/admin/tokens` 创建独�
 
 - 内容：`content_list`, `content_get`, `content_create`, `content_update`, `content_delete`, `content_publish`, `content_search`, `content_stats`
 - 笔记：`note_list`, `note_get`, `note_create`, `note_update`, `note_promote`
-- 审核：`review_queue`, `review_submit`, `review_decide`, `revision_list`, `revision_get`
-- 批注：`annotation_queue`, `annotation_list`, `annotation_get`, `annotation_create`, `annotation_reply`, `annotation_resolve`
-- AI 版本：`proposal_create`, `proposal_list`, `proposal_get`, `proposal_apply`, `proposal_reject`
+- 实例：`instance_info`
+- 审核：`review_queue`, `review_submit`, `review_decide`, `revision_list`, `revision_get`（`review_decide` 的 `publish=true` 只能配合 `approved`，审核与发布一次写入）
+- 批注：`annotation_queue`, `annotation_list`, `annotation_get`, `annotation_create`, `annotation_reply`, `annotation_resolve`（关闭批注，即 `annotation_resolve` 或 `annotation_reply` 带 `status=resolved`，需要 `review` scope）
+- AI 版本：`proposal_create`, `proposal_list`, `proposal_get`, `proposal_update`, `proposal_apply`, `proposal_reject`（`proposal_create` 建议带 `expected_updated_at`，原文已变化时返回冲突）
 - 评论：`comment_list`, `comment_moderate`
 
-资源包括 `typecho://review/queue`、`typecho://annotations/queue`、`typecho://notes/recent` 和 `typecho://content/{id}`。
+资源包括 `typecho://review/queue`、`typecho://annotations/queue` 和 `typecho://notes/recent`（`resources/list`），以及资源模板 `typecho://content/{id}`（`resources/templates/list`）。
+
+批量 JSON-RPC 请求最多 50 条；空数组或结构错误的请求返回 `-32600`。
 
 ## 客户端配置示例
 

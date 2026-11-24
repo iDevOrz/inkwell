@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import time
@@ -36,6 +38,12 @@ USER_AGENT = (
 TZ = timezone(timedelta(hours=8))
 ALLOWED_IMAGE_EXT = {"png", "jpg", "jpeg", "gif", "webp", "avif"}
 IMPORT_PROBE_SETTING = "__inkwell_import_target_probe__"
+REQUEST_TIMEOUT_SECONDS = 45
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_REDIRECTS = 5
+DOWNLOAD_CHUNK_BYTES = 64 * 1024
+ALLOWED_FETCH_SCHEMES = {"http", "https"}
 
 
 def slugify(value: str) -> str:
@@ -53,8 +61,77 @@ def slugify(value: str) -> str:
     return result or "item"
 
 
-def fetch(session: requests.Session, url: str) -> requests.Response:
-    response = session.get(url, timeout=45)
+def ensure_public_url(url: str) -> None:
+    """Reject non-HTTP(S) URLs and hosts that resolve to non-public addresses."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ALLOWED_FETCH_SCHEMES or not parsed.hostname:
+        raise ValueError(f"refusing to fetch non-http(s) URL: {url}")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as error:
+        raise ValueError(f"cannot resolve {parsed.hostname}: {error}") from error
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0].split("%")[0])
+        if (
+            not address.is_global
+            or address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_multicast
+            or address.is_reserved
+            or address.is_unspecified
+        ):
+            raise ValueError(
+                f"refusing to fetch {url}: {parsed.hostname} resolves to non-public {address}"
+            )
+
+
+def read_limited(response: requests.Response, max_bytes: int) -> bytes:
+    declared = response.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise ValueError(f"response too large ({declared} bytes > {max_bytes})")
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_BYTES):
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"response exceeds {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def fetch_limited(
+    session: requests.Session, url: str, max_bytes: int = MAX_PAGE_BYTES
+) -> requests.Response:
+    """GET a public URL, validating every redirect hop and capping the body size.
+
+    The returned response has its body fully read (``.content``/``.text`` work)
+    and is not checked for HTTP errors.
+    """
+    for _ in range(MAX_REDIRECTS + 1):
+        ensure_public_url(url)
+        response = session.get(
+            url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True, allow_redirects=False
+        )
+        try:
+            if response.is_redirect:
+                url = urljoin(url, response.headers.get("location", ""))
+                continue
+            data = read_limited(response, max_bytes)
+        finally:
+            response.close()
+        # Hand back a regular response whose body is already buffered.
+        response._content = data  # noqa: SLF001
+        response._content_consumed = True  # noqa: SLF001
+        return response
+    raise ValueError(f"too many redirects (> {MAX_REDIRECTS})")
+
+
+def fetch(
+    session: requests.Session, url: str, max_bytes: int = MAX_PAGE_BYTES
+) -> requests.Response:
+    response = fetch_limited(session, url, max_bytes)
     response.raise_for_status()
     return response
 
@@ -67,7 +144,7 @@ def discover_articles(session: requests.Session, site: str) -> list[str]:
 
     for page in range(1, 50):
         page_url = site if page == 1 else urljoin(site, f"index.php/page/{page}/")
-        response = session.get(page_url, timeout=45)
+        response = fetch_limited(session, page_url)
         if response.status_code != 200:
             break
         soup = BeautifulSoup(response.text, "html.parser")
@@ -157,7 +234,8 @@ def normalize_language(language: str) -> str:
 
 
 def fence_for(code: str) -> str:
-    return "````" if "```" in code else "```"
+    longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def download_image(
@@ -174,8 +252,7 @@ def download_image(
         return url
 
     try:
-        response = session.get(url, timeout=45)
-        response.raise_for_status()
+        response = fetch(session, url, MAX_IMAGE_BYTES)
         content_type = response.headers.get("content-type", "").split(";")[0].strip()
         if not content_type.startswith("image/"):
             return url
@@ -309,6 +386,24 @@ def mcp_tool(
     return result["structuredContent"]
 
 
+class AlreadyImported(Exception):
+    def __init__(self, content_id: int) -> None:
+        super().__init__(f"already exists (id={content_id})")
+        self.content_id = content_id
+
+
+def slug_from_url(url: str) -> str:
+    return slugify(Path(urlparse(url).path).stem)
+
+
+def find_existing(conn: sqlite3.Connection, title: str | None, slug: str) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM contents WHERE title = ? OR slug = ?",
+        (title, slug),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def parse_article(
     session: requests.Session,
     url: str,
@@ -325,6 +420,12 @@ def parse_article(
     if not title_tag:
         raise RuntimeError("missing h1.posttitle")
     title = title_tag.get_text(" ", strip=True)
+    slug = slug_from_url(url)
+    # Check before converting the body so reruns never re-download images
+    # or leave media rows behind for skipped articles.
+    existing_id = find_existing(conn, title, slug)
+    if existing_id is not None:
+        raise AlreadyImported(existing_id)
 
     time_tag = soup.select_one("time[datetime]")
     if not time_tag:
@@ -359,7 +460,6 @@ def parse_article(
     if not markdown:
         raise RuntimeError("empty article body")
 
-    slug = slugify(Path(urlparse(url).path).stem)
     return {
         "url": url,
         "title": title,
@@ -484,6 +584,7 @@ def main() -> int:
         try:
             verify_instance_target(conn, db_path, session, args.mcp_url, args.token)
         except Exception as error:  # noqa: BLE001
+            conn.close()
             parser.error(f"target verification failed before writing: {error}")
         conn.close()
         conn = connect_database(db_path, read_only=False)
@@ -504,6 +605,11 @@ def main() -> int:
 
     for index, url in enumerate(urls, start=1):
         print(f"[{index}/{len(urls)}] {url}")
+        existing_id = find_existing(conn, None, slug_from_url(url))
+        if existing_id is not None:
+            skipped += 1
+            print(f"  skipped, already exists (id={existing_id})")
+            continue
         try:
             article = parse_article(
                 session,
@@ -514,18 +620,15 @@ def main() -> int:
                 args.no_images,
                 args.dry_run,
             )
+        except AlreadyImported as error:
+            skipped += 1
+            print(f"  skipped, {error}")
+            continue
         except Exception as error:  # noqa: BLE001
             failed += 1
+            # Drop media rows inserted for an article that will not be imported.
+            conn.rollback()
             print(f"  failed to parse: {error}")
-            continue
-
-        existing = conn.execute(
-            "SELECT id FROM contents WHERE title = ? OR slug = ?",
-            (article["title"], article["slug"]),
-        ).fetchone()
-        if existing:
-            skipped += 1
-            print(f"  skipped, already exists (id={existing[0]})")
             continue
 
         print(

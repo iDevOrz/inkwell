@@ -173,6 +173,17 @@ impl TestApp {
         }
     }
 
+    pub fn data_dir(&self) -> &Path {
+        self._data_dir.path()
+    }
+
+    /// GET a page and return its status and body text.
+    pub async fn page(&self, uri: &str, session: Option<&Session>) -> (u16, String) {
+        let response = self.get(uri, session).await;
+        let status = response.status().as_u16();
+        (status, body_string(response).await)
+    }
+
     pub async fn token_with(&self, scopes: &[&str]) -> String {
         let scopes: Vec<String> = scopes.iter().map(|scope| scope.to_string()).collect();
         let (_, token) = inkwell::repo::token::create(&self.pool, "test", &scopes)

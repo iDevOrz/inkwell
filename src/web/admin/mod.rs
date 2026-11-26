@@ -36,9 +36,9 @@ use super::templates::{
     AdminListTemplate, AnnotateTemplate, AnnotationQueueView, AnnotationReplyView, AnnotationView,
     AnnotationsTemplate, CommentAdminView, CommentsTemplate, ContentFormView, DashboardTemplate,
     DiffLine, DiffTemplate, EditTemplate, LoginTemplate, MediaTemplate, MediaView,
-    PasswordTemplate, PromotedInfo, ProposalDiffTemplate, ProposalView, ReviewTemplate,
-    ScopeOption, SettingsTemplate, SourceNoteInfo, StatusCount, TermsTemplate, TokenView,
-    TokensTemplate, render, revision_view,
+    PasswordTemplate, ProfileTemplate, PromotedInfo, ProposalDiffTemplate, ProposalView,
+    ReviewTemplate, ScopeOption, SettingsTemplate, SourceNoteInfo, StatusCount, TermsTemplate,
+    TokenView, TokensTemplate, render, revision_view,
 };
 use super::views::{
     AdminCtx, actor_label, error_for, notice_for, status_options, visibility_options,
@@ -74,6 +74,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/login", get(login_page).post(login_submit))
         .route("/admin/logout", post(logout))
         .route("/admin", get(dashboard))
+        .route("/admin/profile", get(profile_page).post(profile_submit))
         .route("/admin/password", get(password_page).post(password_submit))
         .route("/admin/review", get(review_page))
         .route("/admin/review/{id}", post(review_submit))
@@ -84,6 +85,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/comments", get(comments_page))
         .route("/admin/comments/{id}/status", post(comment_status))
         .route("/admin/terms", get(terms_page).post(term_create))
+        .route("/admin/terms/{id}", post(term_update))
         .route("/admin/terms/{id}/delete", post(term_delete))
         .route("/admin/settings", get(settings_page).post(settings_submit))
         .route(

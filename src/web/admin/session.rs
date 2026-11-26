@@ -159,6 +159,83 @@ pub(super) async fn logout(
     Ok(response)
 }
 
+pub(super) async fn profile_page(
+    State(state): State<AppState>,
+    AdminSession(session): AdminSession,
+    Query(query): Query<AdminListQuery>,
+) -> AppResult<Response> {
+    let homepage = user::homepage(&state.db, session.user.id).await?;
+    let ctx = admin_ctx(
+        &state,
+        &session,
+        "profile",
+        notice_for(query.notice.as_deref()),
+        None,
+    )
+    .await?;
+    Ok(render(ProfileTemplate {
+        ctx,
+        display_name: session.user.display_name,
+        email: session.user.email.unwrap_or_default(),
+        homepage: homepage.unwrap_or_default(),
+    })?
+    .into_response())
+}
+
+pub(super) async fn profile_submit(
+    State(state): State<AppState>,
+    AdminSession(session): AdminSession,
+    Form(form): Form<ProfileForm>,
+) -> AppResult<Response> {
+    verify_csrf(&session, form.csrf.as_deref().unwrap_or(""))?;
+    let name = form.display_name.trim();
+    let email = form.email.trim();
+    let homepage = form.homepage.trim();
+    let email_valid = email.is_empty()
+        || (email.len() <= 254
+            && !email
+                .chars()
+                .any(|ch| ch.is_whitespace() || ch.is_control())
+            && email.split_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty() && !domain.is_empty() && !domain.contains('@')
+            }));
+    let homepage_valid = homepage.is_empty()
+        || (homepage.len() <= 2048
+            && homepage.parse::<axum::http::Uri>().is_ok_and(|uri| {
+                matches!(uri.scheme_str(), Some("https" | "http")) && uri.authority().is_some()
+            }));
+    let error =
+        if name.is_empty() || name.chars().count() > 128 || name.chars().any(char::is_control) {
+            Some("请输入 1 到 128 个字符的昵称")
+        } else if !email_valid {
+            Some("请输入有效的邮件地址")
+        } else if !homepage_valid {
+            Some("个人主页必须是有效的 HTTP 或 HTTPS 地址")
+        } else {
+            None
+        };
+    if let Some(message) = error {
+        let ctx = admin_ctx(&state, &session, "profile", None, Some(message.to_string())).await?;
+        return Ok(render(ProfileTemplate {
+            ctx,
+            display_name: form.display_name,
+            email: form.email,
+            homepage: form.homepage,
+        })?
+        .into_response());
+    }
+
+    user::update_profile(
+        &state.db,
+        session.user.id,
+        name,
+        (!email.is_empty()).then_some(email),
+        (!homepage.is_empty()).then_some(homepage),
+    )
+    .await?;
+    Ok(Redirect::to("/admin/profile?notice=saved").into_response())
+}
+
 pub(super) async fn password_page(
     State(state): State<AppState>,
     AdminSession(session): AdminSession,

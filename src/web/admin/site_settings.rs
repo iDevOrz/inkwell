@@ -59,12 +59,39 @@ pub(super) async fn settings_submit(
         .await;
     }
 
+    let current = settings::load(&state.db, &state.config.site_url).await?;
+    let avatar_url = form
+        .avatar_url
+        .as_deref()
+        .unwrap_or(&current.avatar_url)
+        .trim();
+    if !avatar_url.is_empty() && !avatar_url.starts_with("https://") {
+        return settings_error(&state, &session, &form, "头像链接必须以 https:// 开头").await;
+    }
     let settings = SiteSettings {
         title: form.site_title.trim().to_string(),
         description: form.site_description.trim().to_string(),
         keywords: form.site_keywords.trim().to_string(),
         site_url: form.site_url.trim().trim_end_matches('/').to_string(),
         footer_text: form.footer_text.trim().to_string(),
+        avatar_url: avatar_url.to_string(),
+        home_quotes: form
+            .home_quotes
+            .as_deref()
+            .unwrap_or(&current.home_quotes)
+            .replace("\r\n", "\n")
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+        icp_number: form
+            .icp_number
+            .as_deref()
+            .unwrap_or(&current.icp_number)
+            .trim()
+            .to_string(),
         page_size,
         timezone_offset,
         comments_enabled: form.comments_enabled.is_some(),
@@ -89,6 +116,18 @@ pub(super) async fn settings_error(
         keywords: form.site_keywords.clone(),
         site_url: form.site_url.clone(),
         footer_text: form.footer_text.clone(),
+        avatar_url: form
+            .avatar_url
+            .clone()
+            .unwrap_or_else(|| ctx.site.avatar_url.clone()),
+        home_quotes: form
+            .home_quotes
+            .clone()
+            .unwrap_or_else(|| ctx.site.home_quotes.clone()),
+        icp_number: form
+            .icp_number
+            .clone()
+            .unwrap_or_else(|| ctx.site.icp_number.clone()),
         page_size: form.page_size.parse().unwrap_or(8),
         timezone_offset: form.timezone_offset.parse().unwrap_or(480),
         comments_enabled: form.comments_enabled.is_some(),

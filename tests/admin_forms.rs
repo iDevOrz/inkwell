@@ -366,6 +366,35 @@ async fn terms_can_be_created_and_deleted() {
         .fetch_one(&app.pool)
         .await
         .expect("term");
+    let (_, edit) = app
+        .page(
+            &format!("/admin/terms?status=tag&edit={term_id}"),
+            Some(&admin),
+        )
+        .await;
+    assert!(edit.contains("编辑标签"));
+    let saved = app
+        .post_form(
+            &format!("/admin/terms/{term_id}"),
+            Some(&admin),
+            &[
+                ("_csrf", &admin.csrf),
+                ("kind", "tag"),
+                ("name", "修改后的标签"),
+                ("slug", ""),
+                ("description", "新的描述"),
+            ],
+        )
+        .await;
+    assert!(location(&saved).ends_with("notice=saved"));
+    let term = inkwell::repo::term::get_by_id(&app.pool, term_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(term.name, "修改后的标签");
+    assert_eq!(term.slug, "new-tag");
+    assert_eq!(term.description.as_deref(), Some("新的描述"));
+
     let deleted = app
         .post_form(
             &format!("/admin/terms/{term_id}/delete"),
@@ -379,6 +408,35 @@ async fn terms_can_be_created_and_deleted() {
         .await
         .expect("count");
     assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn administrators_can_update_their_profile() {
+    let app = TestApp::new().await;
+    let admin = app.session_for("admin").await;
+    let saved = app
+        .post_form(
+            "/admin/profile",
+            Some(&admin),
+            &[
+                ("_csrf", &admin.csrf),
+                ("display_name", "个人昵称"),
+                ("email", "admin@example.test"),
+                ("homepage", "https://example.test/about"),
+            ],
+        )
+        .await;
+    assert_eq!(location(&saved), "/admin/profile?notice=saved");
+    let (status, page) = app.page("/admin/profile", Some(&admin)).await;
+    assert_eq!(status, StatusCode::OK);
+    for value in [
+        "个人昵称",
+        "admin@example.test",
+        "https://example.test/about",
+    ] {
+        assert!(page.contains(value));
+    }
+    assert!(page.contains("/admin/password"));
 }
 
 fn settings_form<'a>(csrf: &'a str, title: &'a str, page_size: &'a str) -> Vec<(&'a str, &'a str)> {
@@ -400,16 +458,20 @@ async fn site_settings_are_saved_and_validated() {
     let app = TestApp::new().await;
     let admin = app.session_for("admin").await;
 
-    let saved = app
-        .post_form(
-            "/admin/settings",
-            Some(&admin),
-            &settings_form(&admin.csrf, "新的站点名", "10"),
-        )
-        .await;
+    let mut form = settings_form(&admin.csrf, "新的站点名", "10");
+    form.extend([
+        ("avatar_url", "https://example.com/avatar.png"),
+        ("home_quotes", "第一条引语\r\n同一条换行\r\n \r\n第二条引语"),
+        ("icp_number", "测试备案号"),
+    ]);
+    let saved = app.post_form("/admin/settings", Some(&admin), &form).await;
     assert!(location(&saved).ends_with("notice=settings_saved"));
     let (_, home) = app.page("/", None).await;
     assert!(home.contains("新的站点名"));
+    assert!(home.contains("https://example.com/avatar.png"));
+    assert!(home.contains("https://beian.miit.gov.cn/"));
+    assert!(home.contains("测试备案号"));
+    assert!(home.contains("第一条引语\n同一条换行") ^ home.contains("第二条引语"));
 
     let invalid = app
         .post_form(

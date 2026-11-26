@@ -32,7 +32,11 @@ pub async fn get_view(
         terms.into_iter().partition(|term| term.kind == "category");
 
     let wiki = build_wiki_map(pool, id, for_admin).await?;
-    let html = markdown::render_markdown(&content.body, &wiki);
+    let (html, headings) = if content.kind == "post" {
+        markdown::render_article(&content.body, &wiki)
+    } else {
+        (markdown::render_markdown(&content.body, &wiki), Vec::new())
+    };
     let excerpt_text = content
         .excerpt
         .clone()
@@ -83,6 +87,7 @@ pub async fn get_view(
         categories,
         tags,
         html,
+        headings,
         excerpt_text,
         reading_minutes,
         has_mermaid,

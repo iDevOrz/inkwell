@@ -16,16 +16,25 @@
   <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom.xml">
   <script src="/static/theme-init.js?v=1"></script>
   <link rel="stylesheet" href="/static/theme.css?v=1">
-  <link rel="stylesheet" href="/static/site.css?v=28">
+  <link rel="stylesheet" href="/static/site.css?v=35">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body id="top"{% block body_class %}{% endblock %}>
   <header class="site-header">
     <div class="container-wide header-inner">
-      <a class="brand" href="/" aria-label="返回首页">
-        <span class="logo" aria-hidden="true">T</span>
-        <span class="brand-text">{{ ctx.site.title }}</span>
-      </a>
+      <div class="header-identity">
+        {% if !ctx.site.avatar_url.is_empty() %}
+          <a href="/" class="site-avatar-link" aria-label="返回首页">
+            <img class="site-avatar" src="{{ ctx.site.avatar_url }}" alt="" width="52" height="52" referrerpolicy="no-referrer">
+          </a>
+        {% endif %}
+        <div class="header-title-group">
+          <a class="brand" href="/"><span class="brand-text">{{ ctx.site.title }}</span></a>
+          <nav class="header-nav" aria-label="站点导航">
+            <a href="/" {% if ctx.current_path == "/" %}aria-current="page"{% endif %}>Home</a>
+          </nav>
+        </div>
+      </div>
       <div class="header-actions">
         <form class="search-form" method="get" action="/search" role="search">
           <input type="search" name="q" placeholder="搜索…" aria-label="搜索">
@@ -36,19 +45,29 @@
     </div>
   </header>
 
-  <main class="container-wide main">
+  <main class="container-wide main{% block main_class %}{% endblock %}">
     {% include "partials/flash.html" %}
     {% block content %}{% endblock %}
   </main>
 
   <footer class="site-footer">
     <div class="container-wide footer-inner">
-      <span>{{ ctx.site.footer_text }}</span>
-      <span class="footer-links">
+      <div class="footer-identity">
+        <span>Copyright © {{ ctx.site.copyright_year() }} · <a href="https://github.com/iDevOrz/inkwell">Inkwell</a></span>
+        {% if !ctx.site.icp_number.trim().is_empty() %}
+          <a href="https://beian.miit.gov.cn/">{{ ctx.site.icp_number }}</a>
+        {% endif %}
+        {% if !ctx.site.footer_text.trim().is_empty() &&
+            ctx.site.footer_text != "由 typecho-rs 驱动" && ctx.site.footer_text != "由 inkwell 驱动" %}
+          <p>{{ ctx.site.footer_text }}</p>
+        {% endif %}
+      </div>
+      <nav class="footer-links" aria-label="页脚导航">
         <a href="/feed.xml">RSS</a>
         <a href="/atom.xml">Atom</a>
         <a href="/sitemap.xml">Sitemap</a>
-      </span>
+        <a href="#top">返回顶部</a>
+      </nav>
     </div>
   </footer>
 </body>

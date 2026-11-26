@@ -8,47 +8,62 @@
 {% block og_description %}{{ post.excerpt_text }}{% endblock %}
 {% block og_url %}{{ canonical }}{% endblock %}
 {% block head %}
+  {% if !post.headings.is_empty() %}
+    <script src="/static/article-toc.js?v=2" defer></script>
+  {% endif %}
   {% if post.has_mermaid %}
     <script src="/static/vendor/mermaid.min.js?v=1" defer></script>
     <script src="/static/mermaid-init.js?v=8" defer></script>
   {% endif %}
 {% endblock %}
 
+{% block body_class %} class="article-page"{% endblock %}
+{% block main_class %} main-reading{% endblock %}
+
 {% block content %}
 <div class="reading-page">
-  <nav class="reading-breadcrumb" aria-label="面包屑导航">
-    <a href="/">Inkwell</a>
-    <span aria-hidden="true">/</span>
-    <span>文章</span>
-  </nav>
-
   <div class="reading-layout">
+    {% if !post.headings.is_empty() || !post.tags.is_empty() || !post.categories.is_empty() %}
+      <aside class="reading-rail" aria-label="文章信息">
+        {% if !post.headings.is_empty() %}
+          <nav aria-label="本文目录">
+            <h2 class="reading-side-heading">本文目录</h2>
+            {% include "partials/article_toc.html" %}
+          </nav>
+        {% endif %}
+
+        {% if !post.tags.is_empty() || !post.categories.is_empty() %}
+          <section class="reading-rail-tags">
+            <h2 class="reading-side-heading">分类与标签</h2>
+            <div class="reading-rail-tag-list">
+              {% for category in post.categories %}
+                <a href="/categories/{{ category.slug }}">{{ category.name }}</a>
+              {% endfor %}
+              {% for tag in post.tags %}
+                <a href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+      </aside>
+    {% endif %}
     <div class="reading-main">
       <article class="post reading-post">
         <header class="post-header reading-header">
-          <div class="reading-overline">
-            <span class="reading-overline-mark">INKWELL JOURNAL</span>
-            <span class="reading-overline-rule" aria-hidden="true"></span>
-            <span>ARTICLE</span>
-          </div>
           <h1>{{ post.content.title }}</h1>
-          {% if post.content.excerpt.is_some() %}
-            <p class="reading-deck">{{ post.content.excerpt.as_deref().unwrap_or_default() }}</p>
-          {% endif %}
 
           <div class="post-meta reading-meta">
-            <span>{{ post.author_name }}</span>
-            <span class="reading-meta-separator" aria-hidden="true">/</span>
-            <time>{{ post.published_label }}</time>
-            <span class="reading-meta-separator" aria-hidden="true">/</span>
+            <time datetime="{{ post.published_label }}">{{ post.published_label }}</time>
+            {% for category in post.categories %}
+              <span class="reading-meta-separator" aria-hidden="true">|</span>
+              <a href="/categories/{{ category.slug }}">{{ category.name }}</a>
+            {% endfor %}
+            <span class="reading-meta-separator" aria-hidden="true">|</span>
             <span>{{ post.reading_minutes }} 分钟阅读</span>
           </div>
 
-          {% if !post.categories.is_empty() || !post.tags.is_empty() %}
+          {% if !post.tags.is_empty() %}
             <div class="reading-taxonomy">
-              {% for category in post.categories %}
-                <a class="reading-category" href="/categories/{{ category.slug }}">{{ category.name }}</a>
-              {% endfor %}
               {% for tag in post.tags %}
                 <a class="tag reading-tag" href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
               {% endfor %}
@@ -59,6 +74,18 @@
             <div class="flash flash-error">这是一篇私密内容，仅登录用户可见。</div>
           {% endif %}
         </header>
+
+        {% if !post.headings.is_empty() %}
+          <details class="reading-mobile-toc">
+            <summary aria-label="本文目录">
+              <span class="reading-toc-icon" aria-hidden="true"><span></span></span>
+            </summary>
+            <nav class="reading-mobile-toc-panel" aria-label="本文目录">
+              <h2 class="reading-side-heading">本文目录</h2>
+              {% include "partials/article_toc.html" %}
+            </nav>
+          </details>
+        {% endif %}
 
         <div class="prose reading-prose">
           {{ post.html|safe }}
@@ -84,15 +111,12 @@
 
       <section class="comments reading-comments" id="comments">
         <div class="section-heading reading-section-heading">
-          <div>
-            <p class="reading-section-kicker">THE CONVERSATION</p>
-            <h2>留下一点回声</h2>
-          </div>
+          <h2>评论</h2>
           <span class="count">{{ comment_count }} 条评论</span>
         </div>
 
         {% if comments.is_empty() %}
-          <p class="muted reading-empty-comments">还没有评论。欢迎开始这场对话。</p>
+          <p class="muted reading-empty-comments">还没有评论。</p>
         {% else %}
           <div class="comment-list">
             {% for item in comments %}
@@ -147,41 +171,13 @@
       </section>
     </div>
 
-    <aside class="reading-rail" aria-label="文章信息">
-      <section class="reading-rail-card">
-        <p class="reading-rail-kicker">IN THIS ENTRY</p>
-        <dl class="reading-facts">
-          <div>
-            <dt>阅读时间</dt>
-            <dd>{{ post.reading_minutes }} 分钟</dd>
-          </div>
-          <div>
-            <dt>发布于</dt>
-            <dd>{{ post.published_label }}</dd>
-          </div>
-          <div>
-            <dt>作者</dt>
-            <dd>{{ post.author_name }}</dd>
-          </div>
-        </dl>
-        {% if let Some(category) = post.categories.first() %}
-          <a class="reading-rail-link" href="/categories/{{ category.slug }}">浏览「{{ category.name }}」<span aria-hidden="true">↗</span></a>
-        {% endif %}
-        <a class="reading-rail-link" href="#comments">前往评论区 <span aria-hidden="true">↓</span></a>
-      </section>
-
-      {% if !post.tags.is_empty() %}
-        <section class="reading-rail-tags">
-          <p class="reading-rail-kicker">RELATED TERMS</p>
-          <div class="reading-rail-tag-list">
-            {% for tag in post.tags %}
-              <a href="/tags/{{ tag.slug }}">#{{ tag.name }}</a>
-            {% endfor %}
-          </div>
-        </section>
+    <aside class="reading-owner" aria-label="站长信息">
+      <p class="reading-side-heading">站长</p>
+      <a class="reading-owner-name" href="/">{{ ctx.site.title }}</a>
+      {% if !ctx.site.description.trim().is_empty() %}
+        <p>{{ ctx.site.description }}</p>
       {% endif %}
-
-      <p class="reading-rail-note">Write, note,<br>and think with AI.</p>
+      <a class="reading-owner-feed" href="/feed.xml">RSS 订阅</a>
     </aside>
   </div>
 </div>

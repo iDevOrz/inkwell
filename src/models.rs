@@ -309,6 +309,8 @@ pub struct ContentView {
     pub categories: Vec<Term>,
     pub tags: Vec<Term>,
     pub html: String,
+    #[serde(skip)]
+    pub headings: Vec<crate::markdown::ArticleHeading>,
     pub excerpt_text: String,
     pub reading_minutes: i64,
     pub has_mermaid: bool,

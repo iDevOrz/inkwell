@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+
+{% block title %}个人设置{% endblock %}
+{% block heading %}个人设置{% endblock %}
+
+{% block content %}
+<form method="post" action="/admin/profile" class="panel stack-form narrow-form">
+  <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
+  <label class="field">昵称
+    <input type="text" name="display_name" value="{{ display_name }}" required maxlength="128" autocomplete="nickname">
+  </label>
+  <label class="field">邮件地址
+    <input type="email" name="email" value="{{ email }}" maxlength="254" autocomplete="email">
+  </label>
+  <label class="field">个人主页
+    <input type="url" name="homepage" value="{{ homepage }}" maxlength="2048" autocomplete="url">
+  </label>
+  <div class="form-actions">
+    <button class="button" type="submit">保存资料</button>
+    <a href="/admin/password">修改密码</a>
+  </div>
+</form>
+{% endblock %}

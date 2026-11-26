@@ -115,6 +115,42 @@ pub async fn create(
     }
 }
 
+pub(crate) async fn update(
+    pool: &SqlitePool,
+    term: &Term,
+    name: &str,
+    slug: Option<&str>,
+    description: Option<&str>,
+) -> AppResult<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::bad_request("名称不能为空"));
+    }
+    let slug = slug
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(slugify)
+        .unwrap_or_else(|| term.slug.clone());
+    if slug.is_empty() {
+        return Err(AppError::bad_request("缩略名不能为空"));
+    }
+    let result = sqlx::query("UPDATE terms SET name = ?, slug = ?, description = ? WHERE id = ?")
+        .bind(name)
+        .bind(slug)
+        .bind(description.map(str::trim).filter(|value| !value.is_empty()))
+        .bind(term.id)
+        .execute(pool)
+        .await;
+    match result {
+        Ok(result) if result.rows_affected() == 1 => Ok(()),
+        Ok(_) => Err(AppError::not_found("分类或标签不存在")),
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            Err(AppError::conflict("该缩略名已存在"))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub async fn delete(pool: &SqlitePool, id: i64) -> AppResult<()> {
     sqlx::query("DELETE FROM terms WHERE id = ?")
         .bind(id)

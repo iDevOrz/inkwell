@@ -11,7 +11,19 @@
   {% if is_home %}<script src="/static/timeline.js?v=1" defer></script>{% endif %}
 {% endblock %}
 
+{% block body_class %}{% if is_home %} class="home-page"{% endif %}{% endblock %}
+
 {% block content %}
+  {% if is_home %}
+    <section class="home-about" aria-label="关于本站">
+      {% if let Some(quote) = ctx.site.home_quote() %}
+        <blockquote class="home-quote">{{ quote }}</blockquote>
+      {% else if !ctx.site.description.trim().is_empty() %}
+        <p class="home-quote">{{ ctx.site.description }}</p>
+      {% endif %}
+      <p class="home-contact">Find me on <a href="https://github.com/iDevOrz">GitHub</a></p>
+    </section>
+  {% endif %}
   {% if !is_home %}
     <section class="page-heading">
       <div>
@@ -28,7 +40,7 @@
   <section class="writing">
     {% if is_home %}
       <div class="section-head">
-        <h1>文章</h1>
+        <h1 lang="en">Writing</h1>
         <span>{{ pagination.total_items }} 篇</span>
       </div>
     {% endif %}

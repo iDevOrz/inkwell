@@ -5,6 +5,7 @@ use super::*;
 #[derive(Debug, Deserialize, Default)]
 pub struct AdminListQuery {
     pub status: Option<String>,
+    pub edit: Option<i64>,
     pub q: Option<String>,
     pub page: Option<i64>,
     pub notice: Option<String>,
@@ -15,6 +16,15 @@ pub struct AdminListQuery {
 pub struct LoginQuery {
     pub next: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileForm {
+    #[serde(rename = "_csrf")]
+    pub csrf: Option<String>,
+    pub display_name: String,
+    pub email: String,
+    pub homepage: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +147,9 @@ pub struct SettingsForm {
     pub site_keywords: String,
     pub site_url: String,
     pub footer_text: String,
+    pub avatar_url: Option<String>,
+    pub home_quotes: Option<String>,
+    pub icp_number: Option<String>,
     pub page_size: String,
     pub timezone_offset: String,
     pub comments_enabled: Option<String>,

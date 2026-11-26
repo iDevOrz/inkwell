@@ -105,3 +105,29 @@ pub(crate) async fn change_password(
     tx.commit().await?;
     Ok(true)
 }
+
+pub(crate) async fn homepage(pool: &SqlitePool, id: i64) -> AppResult<Option<String>> {
+    Ok(
+        sqlx::query_scalar("SELECT homepage FROM users WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+pub(crate) async fn update_profile(
+    pool: &SqlitePool,
+    id: i64,
+    display_name: &str,
+    email: Option<&str>,
+    homepage: Option<&str>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE users SET display_name = ?, email = ?, homepage = ? WHERE id = ?")
+        .bind(display_name)
+        .bind(email)
+        .bind(homepage)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

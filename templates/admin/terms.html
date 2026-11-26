@@ -29,6 +29,7 @@
               <td class="muted">{{ term.term.slug }}</td>
               <td>{{ term.count }}</td>
               <td class="actions">
+                <a class="link-button" href="/admin/terms?status={{ kind }}&amp;edit={{ term.term.id }}">编辑</a>
                 <form method="post" action="/admin/terms/{{ term.term.id }}/delete" data-confirm="删除后内容会失去这个{{ heading }}，确定吗？">
                   <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
                   <button class="link-button danger" type="submit">删除</button>
@@ -42,20 +43,23 @@
   </section>
 
   <section class="panel">
-    <div class="panel-head"><h2>新建{{ heading }}</h2></div>
-    <form method="post" action="/admin/terms" class="stack-form">
+    <div class="panel-head"><h2>{% if editing.is_some() %}编辑{% else %}新建{% endif %}{{ heading }}</h2></div>
+    <form method="post" action="/admin/terms{% if let Some(item) = editing %}/{{ item.id }}{% endif %}" class="stack-form">
       <input type="hidden" name="_csrf" value="{{ ctx.csrf }}">
       <input type="hidden" name="kind" value="{{ kind }}">
       <label class="field">名称
-        <input type="text" name="name" required>
+        <input type="text" name="name" value="{% if let Some(item) = editing %}{{ item.name }}{% endif %}" required>
       </label>
       <label class="field">缩略名
-        <input type="text" name="slug" placeholder="留空自动生成">
+        <input type="text" name="slug" value="{% if let Some(item) = editing %}{{ item.slug }}{% endif %}" placeholder="{% if editing.is_some() %}留空保留原缩略名{% else %}留空自动生成{% endif %}">
       </label>
       <label class="field">描述
-        <textarea name="description" rows="3"></textarea>
+        <textarea name="description" rows="3">{% if let Some(item) = editing %}{{ item.description.as_deref().unwrap_or_default() }}{% endif %}</textarea>
       </label>
-      <button class="button" type="submit">创建{{ heading }}</button>
+      <div class="form-actions">
+        <button class="button" type="submit">{% if editing.is_some() %}保存{% else %}创建{% endif %}{{ heading }}</button>
+        {% if editing.is_some() %}<a href="/admin/terms?status={{ kind }}">取消</a>{% endif %}
+      </div>
     </form>
   </section>
 </div>

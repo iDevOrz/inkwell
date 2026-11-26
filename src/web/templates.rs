@@ -396,6 +396,7 @@ pub struct TermsTemplate {
     pub kind: String,
     pub heading: String,
     pub terms: Vec<TermWithCount>,
+    pub editing: Option<Term>,
     pub error: Option<String>,
 }
 
@@ -479,6 +480,15 @@ pub struct TokensTemplate {
     pub new_token: Option<String>,
     pub scopes: Vec<ScopeOption>,
     pub error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "admin/profile.html")]
+pub struct ProfileTemplate {
+    pub ctx: AdminCtx,
+    pub display_name: String,
+    pub email: String,
+    pub homepage: String,
 }
 
 #[derive(Template)]

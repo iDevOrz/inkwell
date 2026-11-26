@@ -23,6 +23,17 @@
     <label class="field">关键词
       <input type="text" name="site_keywords" value="{{ settings.keywords }}">
     </label>
+    <label class="field">站点头像
+      <input type="url" name="avatar_url" value="{{ settings.avatar_url }}" placeholder="https://…">
+    </label>
+    <label class="field">首页引语
+      <textarea name="home_quotes" rows="6">{{ settings.home_quotes }}</textarea>
+      <span class="field-hint">用空行分隔不同引语。同一条引语可换行。首页每次加载随机选一条。</span>
+    </label>
+    <label class="field">ICP备案号
+      <input type="text" name="icp_number" value="{{ settings.icp_number }}" placeholder="粤ICP备…">
+      <span class="field-hint">显示在页脚并链接至工信部备案网站。留空则隐藏。</span>
+    </label>
     <label class="field">页脚文字
       <input type="text" name="footer_text" value="{{ settings.footer_text }}">
     </label>

@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::OnceLock;
 
-use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd, html};
+use pulldown_cmark::{
+    CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html,
+};
 use syntect::highlighting::ThemeSet;
 use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
@@ -40,7 +42,29 @@ fn is_safe_heading_id(id: &str) -> bool {
             .all(|ch| ch.is_alphanumeric() || ch == '-' || ch == '_')
 }
 
+#[derive(Debug, Clone)]
+pub struct ArticleHeading {
+    pub id: String,
+    pub label: String,
+    pub level: u8,
+}
+
 pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String {
+    render(body, wiki, false).0
+}
+
+pub fn render_article(
+    body: &str,
+    wiki: &HashMap<String, WikiTarget>,
+) -> (String, Vec<ArticleHeading>) {
+    render(body, wiki, true)
+}
+
+fn render(
+    body: &str,
+    wiki: &HashMap<String, WikiTarget>,
+    article: bool,
+) -> (String, Vec<ArticleHeading>) {
     let body = body.replace("<!--more-->", "");
     let expanded = expand_wiki_links(&body, wiki);
 
@@ -130,9 +154,63 @@ pub fn render_markdown(body: &str, wiki: &HashMap<String, WikiTarget>) -> String
         }
     }
 
+    let headings = if article {
+        article_headings(&mut events)
+    } else {
+        Vec::new()
+    };
     let mut output = String::new();
     html::push_html(&mut output, events.into_iter());
-    output
+    (output, headings)
+}
+
+fn article_headings(events: &mut [Event<'_>]) -> Vec<ArticleHeading> {
+    // Reserve authored anchors, even when they occur after generated ones.
+    let reserved: HashSet<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Start(Tag::Heading { id: Some(id), .. }) => Some(id.to_string()),
+            _ => None,
+        })
+        .collect();
+    let mut used = HashSet::new();
+    let mut candidates = (1..).map(|index| format!("section-{index}"));
+    let mut headings = Vec::new();
+    let mut remaining = events;
+    while let Some((event, rest)) = remaining.split_first_mut() {
+        if let Event::Start(Tag::Heading { level, id, .. }) = event {
+            if id.as_ref().is_some_and(|id| !used.insert(id.to_string())) {
+                *id = None;
+            }
+            let level = *level as u8;
+            if level <= HeadingLevel::H4 as u8 {
+                let label = rest
+                    .iter()
+                    .take_while(|event| !matches!(event, Event::End(TagEnd::Heading(_))))
+                    .filter_map(|event| match event {
+                        Event::Text(text) | Event::Code(text) => Some(text.as_ref()),
+                        Event::SoftBreak | Event::HardBreak => Some(" "),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                if !label.trim().is_empty() {
+                    let anchor = id.as_ref().map(ToString::to_string).unwrap_or_else(|| {
+                        candidates
+                            .find(|candidate| !reserved.contains(candidate))
+                            .expect("unbounded heading IDs")
+                    });
+                    *id = Some(CowStr::from(anchor.clone()));
+                    headings.push(ArticleHeading {
+                        id: anchor,
+                        label,
+                        level,
+                    });
+                }
+            }
+        }
+        remaining = rest;
+    }
+    headings
 }
 
 pub fn excerpt(body: &str, max_chars: usize) -> String {
@@ -358,6 +436,21 @@ fn theme_set() -> &'static ThemeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn article_toc_links_use_unique_rendered_anchors() {
+        let body = "## 介绍 **Flutter**\n\n### `build` {#section-1}\n\n## 重复 {#section-1}";
+        let (html, headings) = render_article(body, &HashMap::new());
+
+        assert_eq!(headings.len(), 3);
+        assert_eq!(headings[0].label, "介绍 Flutter");
+        assert_eq!(headings[1].label, "build");
+        assert_eq!(headings[1].level, 3);
+        assert_eq!(headings[1].id, "section-1");
+        for heading in headings {
+            assert_eq!(html.matches(&format!("id=\"{}\"", heading.id)).count(), 1);
+        }
+    }
 
     #[test]
     fn heading_attributes_cannot_inject_styles_or_classes() {

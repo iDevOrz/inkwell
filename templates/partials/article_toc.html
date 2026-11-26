@@ -1,0 +1,5 @@
+<ul class="reading-toc">
+  {% for heading in post.headings %}
+    <li class="reading-toc-level-{{ heading.level }}"><a href="#{{ heading.id }}">{{ heading.label }}</a></li>
+  {% endfor %}
+</ul>

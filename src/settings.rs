@@ -13,6 +13,9 @@ pub struct SiteSettings {
     pub keywords: String,
     pub site_url: String,
     pub footer_text: String,
+    pub avatar_url: String,
+    pub home_quotes: String,
+    pub icp_number: String,
     pub page_size: i64,
     pub timezone_offset: i32,
     pub comments_enabled: bool,
@@ -22,13 +25,33 @@ pub struct SiteSettings {
 }
 
 impl SiteSettings {
+    pub fn home_quote(&self) -> Option<&str> {
+        use rand::seq::IndexedRandom;
+
+        // Stored as plain text, with a blank line between entries.
+        self.home_quotes
+            .split("\n\n")
+            .map(str::trim)
+            .filter(|quote| !quote.is_empty())
+            .collect::<Vec<_>>()
+            .choose(&mut rand::rng())
+            .copied()
+    }
+
+    pub fn copyright_year(&self) -> String {
+        crate::util::format_date(crate::util::now_ts(), self.timezone_offset, "%Y")
+    }
+
     pub fn defaults(site_url: &str) -> Self {
         Self {
             title: "我的博客".to_string(),
             description: "记录想法、笔记与文章。".to_string(),
             keywords: "博客,笔记,Rust".to_string(),
             site_url: site_url.trim_end_matches('/').to_string(),
-            footer_text: "由 inkwell 驱动".to_string(),
+            footer_text: String::new(),
+            avatar_url: String::new(),
+            home_quotes: String::new(),
+            icp_number: String::new(),
             page_size: 8,
             timezone_offset: 480,
             comments_enabled: true,
@@ -51,6 +74,9 @@ pub async fn ensure_defaults(pool: &SqlitePool, site_url: &str) -> AppResult<()>
         ("site_keywords", defaults.keywords),
         ("site_url", defaults.site_url),
         ("footer_text", defaults.footer_text),
+        ("avatar_url", defaults.avatar_url),
+        ("home_quotes", defaults.home_quotes),
+        ("icp_number", defaults.icp_number),
         ("page_size", defaults.page_size.to_string()),
         ("timezone_offset", defaults.timezone_offset.to_string()),
         ("comments_enabled", bool_value(defaults.comments_enabled)),
@@ -109,6 +135,11 @@ pub async fn load(pool: &SqlitePool, fallback_url: &str) -> AppResult<SiteSettin
             .trim_end_matches('/')
             .to_string(),
         footer_text: get("footer_text").unwrap_or(defaults.footer_text),
+        avatar_url: get("avatar_url")
+            .filter(|url| url.starts_with("https://"))
+            .unwrap_or(defaults.avatar_url),
+        home_quotes: get("home_quotes").unwrap_or(defaults.home_quotes),
+        icp_number: get("icp_number").unwrap_or(defaults.icp_number),
         page_size: get("page_size")
             .and_then(|value| value.parse().ok())
             .unwrap_or(defaults.page_size)
@@ -134,6 +165,9 @@ pub async fn update(pool: &SqlitePool, settings: &SiteSettings) -> AppResult<()>
             settings.site_url.trim_end_matches('/').to_string(),
         ),
         ("footer_text", settings.footer_text.clone()),
+        ("avatar_url", settings.avatar_url.clone()),
+        ("home_quotes", settings.home_quotes.clone()),
+        ("icp_number", settings.icp_number.clone()),
         ("page_size", settings.page_size.to_string()),
         ("timezone_offset", settings.timezone_offset.to_string()),
         ("comments_enabled", bool_value(settings.comments_enabled)),

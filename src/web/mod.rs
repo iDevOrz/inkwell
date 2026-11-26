@@ -117,6 +117,10 @@ async fn static_asset(Path(path): Path<String>) -> Response {
             "application/javascript; charset=utf-8",
             include_str!("../../static/timeline.js"),
         ),
+        "article-toc.js" => (
+            "application/javascript; charset=utf-8",
+            include_str!("../../static/article-toc.js"),
+        ),
         "annotations.js" => (
             "application/javascript; charset=utf-8",
             include_str!("../../static/annotations.js"),

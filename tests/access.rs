@@ -136,6 +136,7 @@ async fn back_office_pages_require_the_right_role() {
         "/admin/terms",
         "/admin/media",
         "/admin/password",
+        "/admin/profile",
         edit.as_str(),
     ] {
         assert_get_matrix(&app, &roles, uri, content_roles).await;
@@ -192,6 +193,9 @@ fn complete_form(csrf: Option<&str>) -> Vec<(&str, &str)> {
         ("verdict", "approved"),
         ("kind", "tag"),
         ("name", "x"),
+        ("display_name", "x"),
+        ("email", ""),
+        ("homepage", ""),
         ("action", "approve"),
         ("comment", "x"),
         ("site_title", "x"),
@@ -219,6 +223,8 @@ fn state_changing_routes(post: i64) -> Vec<String> {
         format!("/admin/review/{post}"),
         format!("/admin/posts/{post}/annotations"),
         "/admin/terms".to_string(),
+        "/admin/terms/1".to_string(),
+        "/admin/profile".to_string(),
         "/admin/comments/1/status".to_string(),
         "/admin/settings".to_string(),
         "/admin/tokens".to_string(),

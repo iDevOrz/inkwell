@@ -78,15 +78,24 @@ pub(super) async fn login_submit(
         .await;
     };
 
-    state.login_limiter.record_success(&ip);
-    let (token, _) = create_session(
+    let Some((token, _)) = create_verified_session(
         &state.db,
-        user.id,
+        &user,
         state.config.session_days,
         Some(&ip),
         user_agent(&headers).as_deref(),
     )
-    .await?;
+    .await?
+    else {
+        return render_login(
+            &state,
+            Some("用户名或密码错误。".to_string()),
+            next,
+            form.username,
+        )
+        .await;
+    };
+    state.login_limiter.record_success(&ip);
 
     let mut response = Redirect::to(&next).into_response();
     response.headers_mut().append(
@@ -188,12 +197,9 @@ pub(super) async fn password_submit(
     }
 
     let hash = hash_password_async(form.new_password.clone()).await?;
-    user::update_password(&state.db, session.user.id, &hash).await?;
-    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
-        .bind(session.user.id)
-        .bind(&session.token_hash)
-        .execute(&state.db)
-        .await?;
+    if !user::change_password(&state.db, &session.user, &hash, &session.token_hash).await? {
+        return password_error(&state, &session, "密码已变更，请重新登录").await;
+    }
     Ok(Redirect::to("/admin/password?notice=password_changed").into_response())
 }
 

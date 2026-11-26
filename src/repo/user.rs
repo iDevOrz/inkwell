@@ -79,3 +79,29 @@ pub async fn update_password(pool: &SqlitePool, id: i64, password_hash: &str) ->
         .await?;
     Ok(())
 }
+
+pub(crate) async fn change_password(
+    pool: &SqlitePool,
+    user: &User,
+    new_hash: &str,
+    current_session_hash: &str,
+) -> AppResult<bool> {
+    let mut tx = crate::db::begin_write(pool).await?;
+    let result =
+        sqlx::query("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?")
+            .bind(new_hash)
+            .bind(user.id)
+            .bind(&user.password_hash)
+            .execute(&mut *tx)
+            .await?;
+    if result.rows_affected() == 0 {
+        return Ok(false);
+    }
+    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?")
+        .bind(user.id)
+        .bind(current_session_hash)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(true)
+}

@@ -173,27 +173,61 @@ pub async fn create_session(
     ip: Option<&str>,
     user_agent: Option<&str>,
 ) -> AppResult<(String, String)> {
+    insert_session(pool, user_id, days, ip, user_agent, None)
+        .await?
+        .ok_or_else(|| AppError::not_found("用户不存在"))
+}
+
+pub(crate) async fn create_verified_session(
+    pool: &SqlitePool,
+    user: &User,
+    days: i64,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
+) -> AppResult<Option<(String, String)>> {
+    insert_session(
+        pool,
+        user.id,
+        days,
+        ip,
+        user_agent,
+        Some(&user.password_hash),
+    )
+    .await
+}
+
+async fn insert_session(
+    pool: &SqlitePool,
+    user_id: i64,
+    days: i64,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
+    verified_hash: Option<&str>,
+) -> AppResult<Option<(String, String)>> {
     let token = random_token(32);
     let token_hash = sha256_hex(&token);
     let csrf_token = random_token(24);
     let now = now_ts();
     let expires_at = now + days.max(1) * 24 * 3600;
 
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO sessions(token_hash, user_id, csrf_token, created_at, expires_at, ip, user_agent) \
-         VALUES(?, ?, ?, ?, ?, ?, ?)",
+         SELECT ?, id, ?, ?, ?, ?, ? FROM users WHERE id = ? \
+           AND (? IS NULL OR password_hash = ?)",
     )
     .bind(&token_hash)
-    .bind(user_id)
     .bind(&csrf_token)
     .bind(now)
     .bind(expires_at)
     .bind(ip)
     .bind(user_agent)
+    .bind(user_id)
+    .bind(verified_hash)
+    .bind(verified_hash)
     .execute(pool)
     .await?;
 
-    Ok((token, csrf_token))
+    Ok((result.rows_affected() == 1).then_some((token, csrf_token)))
 }
 
 pub async fn delete_session(pool: &SqlitePool, token_hash: &str) -> AppResult<()> {
@@ -475,6 +509,46 @@ impl LoginLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_password_change_revokes_sessions_and_rejects_stale_verification() {
+        use crate::repo::user;
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let id = user::create(&pool, "admin", "old-hash", "Admin", None, "admin")
+            .await
+            .unwrap();
+        let verified = user::find_by_id(&pool, id).await.unwrap().unwrap();
+        let (current, _) = create_session(&pool, id, 1, None, None).await.unwrap();
+        let (other, _) = create_session(&pool, id, 1, None, None).await.unwrap();
+
+        assert!(
+            user::change_password(&pool, &verified, "new-hash", &sha256_hex(&current))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !user::change_password(&pool, &verified, "stale-change", &sha256_hex(&other))
+                .await
+                .unwrap()
+        );
+        assert!(load_session(&pool, &current).await.unwrap().is_some());
+        assert!(load_session(&pool, &other).await.unwrap().is_none());
+        assert!(
+            create_verified_session(&pool, &verified, 1, None, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let updated = user::find_by_id(&pool, id).await.unwrap().unwrap();
+        assert!(
+            create_verified_session(&pool, &updated, 1, None, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 
     #[test]
     fn password_round_trip() {

@@ -90,7 +90,9 @@ pub fn router() -> Router<AppState> {
             "/admin/media",
             get(media_page)
                 .post(media_upload)
-                .layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::max(
+                    crate::config::MAX_UPLOAD_REQUEST_BYTES,
+                )),
         )
         .route("/admin/media/{id}/delete", post(media_delete))
         .route("/admin/tokens", get(tokens_page).post(token_create))
@@ -99,7 +101,9 @@ pub fn router() -> Router<AppState> {
         .route("/admin/vditor/preview", post(vditor_preview))
         .route(
             "/admin/vditor/upload",
-            post(vditor_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
+            post(vditor_upload).layer(DefaultBodyLimit::max(
+                crate::config::MAX_UPLOAD_REQUEST_BYTES,
+            )),
         )
         .route("/admin/notes/{id}/promote", post(note_promote))
         .route("/admin/{kind}", get(content_list).post(content_create))

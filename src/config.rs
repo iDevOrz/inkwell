@@ -7,6 +7,9 @@ use anyhow::{Context, Result, bail};
 use crate::repo::token::SCOPES;
 
 const DEFAULT_SESSION_DAYS: i64 = 14;
+pub const MAX_UPLOAD_REQUEST_BYTES: usize = 50 * 1024 * 1024;
+// Reserve space for multipart boundaries, headers and the CSRF field.
+const MAX_UPLOAD_FILE_BYTES: usize = MAX_UPLOAD_REQUEST_BYTES - 1024 * 1024;
 const DEFAULT_MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
 const MAX_SESSION_DAYS: i64 = 365;
 
@@ -75,6 +78,11 @@ impl Config {
                 .context("MAX_UPLOAD_BYTES must be a byte count")?,
             None => DEFAULT_MAX_UPLOAD_BYTES,
         };
+
+        anyhow::ensure!(
+            (1..=MAX_UPLOAD_FILE_BYTES).contains(&max_upload_bytes),
+            "MAX_UPLOAD_BYTES must be between 1 and {MAX_UPLOAD_FILE_BYTES} bytes"
+        );
 
         Ok(Self {
             bind_addr,
@@ -244,6 +252,8 @@ mod tests {
             ("MCP_TOKEN_SCOPES", "read,wirte"),
             ("SESSION_DAYS", "0"),
             ("MAX_UPLOAD_BYTES", "ten megabytes"),
+            ("MAX_UPLOAD_BYTES", "0"),
+            ("MAX_UPLOAD_BYTES", "51380225"),
         ] {
             let result = config_from(&[(key, value), ("DATABASE_URL", "sqlite::memory:")]);
             assert!(result.is_err(), "{key}={value} should be rejected");

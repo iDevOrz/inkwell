@@ -3,7 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, FixedOffset, Utc};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -16,7 +15,7 @@ pub fn now_ts() -> i64 {
 
 pub fn random_token(bytes: usize) -> String {
     let mut buffer = vec![0_u8; bytes];
-    rand::rng().fill_bytes(&mut buffer);
+    rand::fill(&mut buffer);
     URL_SAFE_NO_PAD.encode(buffer)
 }
 

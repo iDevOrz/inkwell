@@ -29,7 +29,7 @@ pub async fn media(
         .first_or_octet_stream()
         .to_string();
     let cache_control = if publicly_referenced {
-        "public, max-age=3600"
+        "public, no-cache"
     } else {
         "private, no-store"
     };

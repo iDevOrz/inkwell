@@ -174,10 +174,7 @@ async fn publishing_a_reference_makes_media_public_until_unpublished() {
 
     let public = app.get(&media_uri, None).await;
     assert_eq!(public.status(), StatusCode::OK);
-    assert_eq!(
-        public.headers()[header::CACHE_CONTROL],
-        "public, max-age=3600"
-    );
+    assert_eq!(public.headers()[header::CACHE_CONTROL], "public, no-cache");
     for uri in [
         format!("/tags/{SECRET_TERM}"),
         format!("/categories/{SECRET_TERM}"),

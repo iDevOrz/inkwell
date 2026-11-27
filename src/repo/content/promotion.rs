@@ -78,7 +78,7 @@ pub async fn promote_note(
         .map(|term| term.name.clone());
 
     let title = options.title.unwrap_or_else(|| note.title.clone());
-    let result = create(
+    let result = super::writes::create_with_promotion(
         pool,
         ContentInput {
             kind: "post".to_string(),
@@ -97,11 +97,12 @@ pub async fn promote_note(
             actor: options.actor,
             source_note_id: Some(note.id),
         },
+        Some(&note),
     )
     .await;
 
-    let post_id = match result {
-        Ok(id) => id,
+    let (post_id, created) = match result {
+        Ok(id) => (id, true),
         Err(error) => {
             // If another request won the race, return the existing promoted post.
             if let Some(existing) =
@@ -110,7 +111,7 @@ pub async fn promote_note(
                     .fetch_optional(pool)
                     .await?
             {
-                existing
+                (existing, false)
             } else {
                 return Err(error);
             }
@@ -121,17 +122,23 @@ pub async fn promote_note(
         .await?
         .ok_or_else(|| AppError::internal("转为文章后读取失败"))?;
 
-    let now = now_ts().max(note.updated_at.saturating_add(1));
-    sqlx::query("UPDATE contents SET promoted_to_id = ?, updated_at = ? WHERE id = ?")
+    if !created {
+        // Repair a missing backlink left by older versions, without touching
+        // the version of a note already linked by a concurrent promotion.
+        sqlx::query(
+            "UPDATE contents SET promoted_to_id = ?, updated_at = MAX(?, updated_at + 1) \
+             WHERE id = ? AND promoted_to_id IS NULL AND deleted_at IS NULL AND status != 'trash'",
+        )
         .bind(post_id)
-        .bind(now)
+        .bind(now_ts())
         .bind(note.id)
         .execute(pool)
         .await?;
+    }
 
     Ok(PromoteResult {
         id: post.id,
         slug: post.slug,
-        created: true,
+        created,
     })
 }

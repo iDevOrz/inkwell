@@ -3,6 +3,14 @@
 use super::*;
 
 pub async fn create(pool: &SqlitePool, input: ContentInput) -> AppResult<i64> {
+    create_with_promotion(pool, input, None).await
+}
+
+pub(super) async fn create_with_promotion(
+    pool: &SqlitePool,
+    input: ContentInput,
+    promotion_source: Option<&Content>,
+) -> AppResult<i64> {
     if !KINDS.contains(&input.kind.as_str()) {
         return Err(AppError::bad_request("未知的内容类型"));
     }
@@ -91,6 +99,21 @@ pub async fn create(pool: &SqlitePool, input: ContentInput) -> AppResult<i64> {
         now,
     )
     .await?;
+    if let Some(note) = promotion_source {
+        let result = sqlx::query(
+            "UPDATE contents SET promoted_to_id = ?, updated_at = ? \
+             WHERE id = ? AND updated_at = ? AND promoted_to_id IS NULL",
+        )
+        .bind(id)
+        .bind(now.max(note.updated_at.saturating_add(1)))
+        .bind(note.id)
+        .bind(note.updated_at)
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(AppError::conflict("笔记已被修改，请重新读取后再转为文章"));
+        }
+    }
     transaction.commit().await?;
 
     if input.kind == "note" {

@@ -180,3 +180,40 @@ async fn a_proposal_version_is_applied_at_most_once() {
         .expect("count");
     assert_eq!(revisions, 2, "create + exactly one apply");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_note_promotions_create_and_link_a_post_once() {
+    let app = TestApp::with_file_database().await;
+    let note = app
+        .tool(
+            "note_create",
+            json!({"title": "Concurrent promotion", "body": "A note"}),
+        )
+        .await;
+    let note_id = note["structuredContent"]["id"].as_i64().expect("note id");
+    let before: i64 = sqlx::query_scalar("SELECT updated_at FROM contents WHERE id = ?")
+        .bind(note_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+
+    let results = race_tool(
+        &app,
+        "note_promote",
+        vec![json!({"id": note_id}); CONCURRENT_REQUESTS],
+    )
+    .await;
+    let (linked_post, after): (i64, i64) =
+        sqlx::query_as("SELECT promoted_to_id, updated_at FROM contents WHERE id = ?")
+            .bind(note_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+    let mut created = 0;
+    for result in results {
+        assert_eq!(result["structuredContent"]["id"], linked_post, "{result}");
+        created += usize::from(result["structuredContent"]["created"] == true);
+    }
+    assert_eq!(created, 1);
+    assert!(after > before);
+}
